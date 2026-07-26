@@ -27,7 +27,18 @@ ollama pull qwen3:8b      # validator (checks them — different family, fail-cl
 The embedding model (`BAAI/bge-small-en-v1.5`, 384-dim) downloads automatically
 via fastembed on first ingest.
 
-## 3. Tell Heydey where your documents live
+## 3. One command: `heydey init`
+
+```bash
+ln -s "$PWD/heydey" /usr/local/bin/heydey   # or ./heydey from the repo root
+heydey init --workspace mycompany --root ~/Documents/company-docs
+```
+
+Writes the config, creates the workspace, ingests, runs the retrieval gate, and
+prints **TTFR** — your minutes-to-first-cited-answer (fresh-env measured: 2.9 min).
+Prefer manual control? The config file it writes is plain JSON:
+
+## 3b. Or: tell Heydey where your documents live, by hand
 
 Your folders are **machine-local config, never code**. Create
 `~/.heydey/corpus.json`:

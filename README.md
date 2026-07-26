@@ -92,7 +92,7 @@ falsifiable gate — a command, a test, or a stopwatch — not a claim.
 
 | Proof | State |
 |---|---|
-| Test suite | **225 / 225 passing** |
+| Test suite | **227 / 227 passing** |
 | Gate runners (retrieval · validator · isolation · auth · secrets · egress · connectors · foundry) | **11 / 11 green** |
 | Retrieval gate (S2) | two documented hard-query failures now return the correct chunk **top-3** with a working breadcrumb |
 | Cross-model validator (S3) | adversarial eval, **0 fabrications** (deterministic probe); cross-family judge being promoted to the default eval gate |
@@ -108,10 +108,14 @@ a DPDP-style local-only egress switch · a Next.js instrument UI (Ask · Today �
 Models · Agents · Connectors) where every surface ships four states (loaded / empty / error /
 ingesting).
 
-**Next:** a `heydey init` wizard over the shipped config path (any folder already ingests via
-`~/.heydey/corpus.json` — the wizard adds ergonomics and a timed stranger-gate) · real OAuth
-connectors (the three shipped connectors are synthetic **demo** MCP servers that exercise the
-security pipeline) · the cross-family judge as the enforced default eval gate.
+**Just landed:** **`heydey init`** — folders → workspace → ingest → retrieval gate → **TTFR
+printed** (measured on a fresh environment: **2.9 minutes** to a cited, gate-checked answer) ·
+the eval judge now defaults to a **third model family** (deepseek), with a loud warning on any
+same-family fallback.
+
+**Next:** real OAuth connectors (the three shipped connectors are synthetic **demo** MCP
+servers that exercise the security pipeline) · the validator-independence experiment
+(checker gets its own retrieval pass; measured delta published).
 
 ## Quickstart
 

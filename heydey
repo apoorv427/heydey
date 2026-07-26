@@ -8,8 +8,13 @@ case "$1" in
     shift
     exec "$PY" -m heydey.find_cli "$@"
     ;;
+  init)
+    shift
+    exec "$PY" -m heydey.init_cli "$@"
+    ;;
   *)
-    echo "usage: heydey find \"query\" [--k N] [--workspace ID] [--json] [--spotlight]"
+    echo "usage: heydey init [--root DIR ...] [--workspace ID]   # folders -> cited answers, timed"
+    echo "       heydey find \"query\" [--k N] [--workspace ID] [--json] [--spotlight]"
     exit 1
     ;;
 esac

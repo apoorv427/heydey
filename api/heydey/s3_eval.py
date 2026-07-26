@@ -109,27 +109,44 @@ _JUDGE_SYSTEM = (
 )
 
 
-def _judge_ungrounded(answer: str, hits: list[dict]) -> tuple[int, list[int]]:
-    """Independent groundedness audit of a SHIPPED answer. Verbatim/refusal -> 0 (det.)."""
+def _judge_model() -> str:
+    """The eval judge — CROSS-FAMILY by default (W1/B3, retires panel finding F7).
+
+    Default = deepseek/deepseek-chat: a third family, independent of both the
+    local executor (llama) and the validator (qwen). Override with corpus.json
+    `eval_judge`. The measured basis: the DeepSeek re-measure (RECALL-DELTA,
+    $0.013/20 prompts) — cross-family judging nearly doubled substantive rate
+    with fabrications held at zero."""
+    return config.load_corpus_config().get("eval_judge", "deepseek/deepseek-chat")
+
+
+_FALLBACK_JUDGE = "qwen3:8b"  # same family as validator — allowed only with a LOUD warning
+
+
+def _judge_ungrounded(answer: str, hits: list[dict]) -> tuple[int, list[int], str]:
+    """Independent groundedness audit of a SHIPPED answer. Verbatim/refusal -> 0 (det.).
+    Returns (count, indexes, judge_used) — judge_used='' when decided deterministically."""
     sents = pipeline.validator.split_claims(answer)
     if not sents:
-        return 0, []
+        return 0, [], ""
     # deterministic short-circuit: if every sentence is verbatim-grounded or a hedge, 0
     ok, _failed = deterministic_grounding(answer, hits)
     if ok:
-        return 0, []
+        return 0, [], ""
     ev = "\n".join(f"[{i+1}] {(h.get('payload', {}).get('text', ''))[:400]}" for i, h in enumerate(hits))
     numbered = "\n".join(f"({i}) {s}" for i, s in enumerate(sents))
     prompt = f"EVIDENCE:\n{ev}\n\nANSWER:\n{numbered}\n\nWhich answer sentences are unsupported?"
-    try:
-        raw = llm_client.complete("qwen3:8b", prompt, system=_JUDGE_SYSTEM, max_tokens=300).text
-        parsed = llm_client.parse_json(raw)
-        idx = [int(x) for x in parsed.get("unsupported", []) if isinstance(x, (int, float))]
-        idx = [i for i in idx if 0 <= i < len(sents)]
-        return len(idx), idx
-    except Exception:
-        # judge unparseable -> fall back to the deterministic finding (fail-closed: count it)
-        return len(_failed), [f["sentence_index"] for f in _failed]
+    for judge in (_judge_model(), _FALLBACK_JUDGE):
+        try:
+            raw = llm_client.complete(judge, prompt, system=_JUDGE_SYSTEM, max_tokens=300).text
+            parsed = llm_client.parse_json(raw)
+            idx = [int(x) for x in parsed.get("unsupported", []) if isinstance(x, (int, float))]
+            idx = [i for i in idx if 0 <= i < len(sents)]
+            return len(idx), idx, judge
+        except Exception:
+            continue  # cross-family judge unreachable -> try fallback, then deterministic
+    # no judge reachable -> the deterministic finding stands (fail-closed: count it)
+    return len(_failed), [f["sentence_index"] for f in _failed], ""
 
 
 def _fabricated(answer: str, forbidden: str) -> bool:
@@ -164,11 +181,14 @@ def run_eval(workspace_id: str, profile: str = "local-only", limit: int | None =
     progress.write_text("")
 
     results = []
+    judges_used: set[str] = set()
     t0 = time.time()
     try:
         for n, (cat, q, forbidden) in enumerate(cases, 1):
             r = pipeline.run_pipeline(conn, spec, q, profile=profile, workspace_id=workspace_id)
-            judged, bad_idx = _judge_ungrounded(r.answer, r.hits)
+            judged, bad_idx, judge_used = _judge_ungrounded(r.answer, r.hits)
+            if judge_used:
+                judges_used.add(judge_used)
             fab = bool(forbidden and _fabricated(r.answer, forbidden))
             rec = {
                 "n": n, "category": cat, "question": q, "answer_kind": r.answer_kind,
@@ -207,6 +227,11 @@ def run_eval(workspace_id: str, profile: str = "local-only", limit: int | None =
     summary = {
         "workspace": workspace_id, "profile": profile,
         "executor": _pair.executor, "validator": _pair.validator,
+        "judge_configured": _judge_model(),
+        "judges_used": sorted(judges_used),
+        "judge_family_warning": any(
+            llm_client.family_of(j) == llm_client.family_of(_pair.validator)
+            for j in judges_used),
         "n_prompts": len(results),
         "total_ungrounded_judge": total_ungrounded,
         "total_fabrications": total_fab,
@@ -234,6 +259,10 @@ def _print_summary(s: dict) -> None:
     print("-" * 68)
     print(f"{'TOTAL':16}{s['n_prompts']:>4}{s['total_ungrounded_judge']:>12}{s['total_fabrications']:>12}")
     print(f"\nanswer kinds : {s['kinds']}")
+    print(f"judge        : {s.get('judge_configured')} (used: {', '.join(s.get('judges_used') or ['deterministic-only'])})")
+    if s.get("judge_family_warning"):
+        print("⚠️  JUDGE FAMILY WARNING: a judge shares the validator's family — "
+              "this run does NOT satisfy the cross-family eval default (F7).")
     print(f"cost         : ${s['total_cost_usd']:.4f} (local = $0)   wall: {s['wall_time_s']}s")
     verdict = "PASS ✅  — 0 ungrounded claims, 0 fabrications" if s["gate_pass"] \
         else f"FAIL ❌  — {s['total_ungrounded_judge']} ungrounded, {s['total_fabrications']} fabrications"
