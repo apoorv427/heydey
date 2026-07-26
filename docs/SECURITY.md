@@ -4,8 +4,8 @@
 each claim.** Every rule is a *runtime enforcement* (a test failure or a runtime
 raise), not a policy note. This doc is one of the S7 done-gate deliverables.
 
-Last verified: 2026-07-21 · commit `9b998d0` · 213 tests + 2 new S7 tests green
-(215 total) · S2/S6a/S6b/S6c gates all PASS.
+Last verified: 2026-07-27 · 225 tests green · all 11 gate runners PASS
+(S2 · S3-artifacts · S4a/b/c · S5-core · S6a/b/c · S7 · parity).
 
 ## 1. The single sentence
 Heydey answers only from your data, always cites its sources, and its writer-model
