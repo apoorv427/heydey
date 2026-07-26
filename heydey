@@ -1,0 +1,15 @@
+#!/bin/bash
+# heydey — Heydey terminal entry point.  `heydey find "query"` = semantic file search.
+# Install: ln -s /path/to/heydey/heydey /usr/local/bin/heydey  (or add this dir to PATH)
+HEYDEY_ROOT="$(cd "$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")" && pwd)"
+PY="${HEYDEY_PY:-$HEYDEY_ROOT/api/.venv/bin/python}"
+case "$1" in
+  find)
+    shift
+    exec "$PY" -m heydey.find_cli "$@"
+    ;;
+  *)
+    echo "usage: heydey find \"query\" [--k N] [--workspace ID] [--json] [--spotlight]"
+    exit 1
+    ;;
+esac

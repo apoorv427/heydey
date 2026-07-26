@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Heydey webapp — production Next.js on 127.0.0.1:3000.
+         Requires a prior `npm run build` in webapp/ (never build while this runs).
+         TEMPLATE: replace __HEYDEY_ROOT__ before installing — see INSTALL.md:
+           sed -e "s|__HEYDEY_ROOT__|$PWD|g" \
+               launchd/ai.heydey.webapp.plist > ~/Library/LaunchAgents/ai.heydey.webapp.plist
+           launchctl load ~/Library/LaunchAgents/ai.heydey.webapp.plist
+         Uninstall: launchctl unload ~/Library/LaunchAgents/ai.heydey.webapp.plist -->
+    <key>Label</key>
+    <string>ai.heydey.webapp</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/npm</string>
+        <string>run</string>
+        <string>start</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HEYDEY_ROOT__/webapp</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/heydey-webapp.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/heydey-webapp.log</string>
+</dict>
+</plist>

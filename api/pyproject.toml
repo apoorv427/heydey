@@ -1,0 +1,33 @@
+# Heydey API — S0 foundation. Versions pinned to the set proven in the BLOS
+# knowledge-vault venv (same Mac, same workload). Banned deps (CLAUDE.md): CI-grepped
+# by tests/test_banned_deps.py — langchain/langgraph/crewai/autogen, Celery/Redis/
+# MinIO/Postgres, hosted vector DBs, Logto, Docker, Neo4j/networkx.
+
+[project]
+name = "heydey"
+version = "0.0.1"
+description = "Heydey — local-first, proof-grade AI OS. S0: isolated, authenticated foundation."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.136.1",
+    "uvicorn==0.46.0",
+    "sqlite-vec==0.1.9",
+    "fastembed==0.7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.3",
+    "httpx==0.28.1",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["heydey"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

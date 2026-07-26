@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Heydey supervisor — the ONE launch entry (single job owner).
+         TEMPLATE: replace __HEYDEY_ROOT__ (repo path) and __HEYDEY_HOME__
+         (usually $HOME/.heydey) before installing — see INSTALL.md:
+           sed -e "s|__HEYDEY_ROOT__|$PWD|g" -e "s|__HEYDEY_HOME__|$HOME/.heydey|g" \
+               launchd/ai.heydey.supervisor.plist > ~/Library/LaunchAgents/ai.heydey.supervisor.plist
+           launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.heydey.supervisor.plist
+         Uninstall: launchctl bootout gui/$(id -u)/ai.heydey.supervisor -->
+    <key>Label</key>
+    <string>ai.heydey.supervisor</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HEYDEY_ROOT__/api/.venv/bin/python</string>
+        <string>__HEYDEY_ROOT__/api/heydey_supervisor.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HEYDEY_ROOT__/api</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__HEYDEY_HOME__/logs/supervisor.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HEYDEY_HOME__/logs/supervisor.launchd.log</string>
+</dict>
+</plist>

@@ -1,0 +1,233 @@
+/* NOCTURNE v0 — docs/demo/NOCTURNE-TOKENS.md. "Linear meets an observatory."
+   Dark instrument; light is data. Confidence = light temperature, never red/green. */
+
+:root {
+  --field: #0a0f1e;
+  --plate: #0d1426;
+  --plate-border: #1c2436;
+  --text: #e6eaf2;
+  --text-muted: #8a94a8;
+  --text-faint: #4a5468;
+
+  --conf-validated: #4fd8c4;
+  --conf-high: #6fcfa9;
+  --conf-mid: #9cc487;
+  --conf-low: #c9b45f;
+  --conf-warn: #e8a13c;
+
+  --radius: 16px;
+  --mono: ui-monospace, "SF Mono", sfmono-regular, Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--field);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, ui-sans-serif,
+    system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(79, 216, 196, 0.28);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+input,
+button,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+h1,
+h2 {
+  letter-spacing: -0.022em; /* titles (token sheet §2) */
+}
+
+/* ── plates: squircle, hairline border, no flat tiles / sharp corners ───────── */
+.plate {
+  background: var(--plate);
+  border: 1px solid var(--plate-border);
+  border-radius: var(--radius);
+}
+
+/* ── the three signature motions (LOCKED) ──────────────────────────────────── */
+
+/* Summon — 200ms slab drop with vibrancy; settles in one beat, no bounce */
+.summon {
+  animation: summon 200ms ease-out both;
+}
+@keyframes summon {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Reveal — receipts illuminate in a 60ms stagger (set --i per line) */
+.reveal {
+  animation: reveal 300ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* validator-seal stamp — a single 120ms scale-settle */
+.seal {
+  animation: seal 120ms ease-out both;
+}
+@keyframes seal {
+  from {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Breath — ≤1% idle luminance on the field, ~6s cycle, pure CSS. Nothing else loops. */
+.breath-field {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    1100px 700px at 50% -8%,
+    rgba(79, 216, 196, 0.05),
+    transparent 62%
+  );
+  animation: breath 6s ease-in-out infinite;
+}
+@keyframes breath {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── utility motion: 150–250ms ease-out, one movement per beat ─────────────── */
+.rise {
+  animation: rise 220ms ease-out both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pulse {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* ── receipts / breadcrumbs: mono 11px (LOCKED) ────────────────────────────── */
+.receipt {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.receipt .score-high {
+  color: var(--conf-high);
+}
+.receipt .score-mid {
+  color: var(--conf-mid);
+}
+.receipt .score-low {
+  color: var(--conf-low);
+}
+.receipt .score-warn {
+  color: var(--conf-warn);
+}
+
+/* ── nav rail ──────────────────────────────────────────────────────────────── */
+.nav-link {
+  display: block;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+  letter-spacing: -0.01em;
+  transition: color 160ms ease-out, background 160ms ease-out;
+}
+.nav-link:hover {
+  color: var(--text);
+}
+.nav-link.active {
+  color: var(--text);
+  background: var(--plate);
+  border: 1px solid var(--plate-border);
+}
+
+/* input inside the summon slab */
+.slab-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 17px;
+  letter-spacing: -0.013em;
+  color: var(--text);
+  padding: 18px 20px;
+}
+.slab-input::placeholder {
+  color: var(--text-faint);
+}
+
+.chip {
+  border: 1px solid var(--plate-border);
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 160ms ease-out, border-color 160ms ease-out;
+}
+.chip:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}

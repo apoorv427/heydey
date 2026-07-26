@@ -1,0 +1,4 @@
+#!/bin/bash
+# blos — deprecated alias for `heydey` (the predecessor codename; kept for back-compat).
+# New name is `heydey`; this shim forwards so existing `blos ...` muscle memory keeps working.
+exec "$(cd "$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")" && pwd)/heydey" "$@"
