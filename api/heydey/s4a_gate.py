@@ -5,7 +5,7 @@ Three assertions, measured live (build doc §6 slice table):
    under 10 seconds (the instant lane). The full cross-model validated lane is
    measured and reported alongside — honestly, not hidden.
 2. SPOTLIGHT SIDE-BY-SIDE: for both queries, the expected document is in
-   `blos find`'s top-3; mdfind (Spotlight's engine) does not surface it in its
+   `heydey find`'s top-3; mdfind (Spotlight's engine) does not surface it in its
    first 5 hits. Meaning beats filenames, deterministically.
 3. MISCONFIGURE BLOCKED @SAVE: a same-family profile (including the
    version-suffix dodge llama3.1 -> llama3.2) must raise at save and leave
@@ -77,7 +77,7 @@ def check_spotlight(conn) -> tuple[bool, list[str]]:
         spot_hit = any(expected in line for line in spotlight_top5)
         win = blos_hit and not spot_hit
         ok &= win
-        lines.append(f"  blos top-3: {'HIT ' if blos_hit else 'MISS'}  "
+        lines.append(f"  heydey top-3: {'HIT ' if blos_hit else 'MISS'}  "
                      f"spotlight top-5: {'hit' if spot_hit else 'miss'}  "
                      f"-> {'WIN' if win else 'FAIL'}  ({expected})")
     return ok, lines

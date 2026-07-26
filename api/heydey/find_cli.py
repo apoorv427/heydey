@@ -1,4 +1,4 @@
-"""``blos find`` — semantic file search from the terminal (build doc §4.1).
+"""``heydey find`` — semantic file search from the terminal (build doc §4.1).
 
 Searches MEANING over the workspace corpus (sqlite-vec + FTS5 hybrid), where
 Spotlight matches filenames/raw tokens. Prints doc-level results with the exact
@@ -37,7 +37,7 @@ def _spotlight(query: str, k: int) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="blos find", description=__doc__)
+    parser = argparse.ArgumentParser(prog="heydey find", description=__doc__)
     parser.add_argument("query")
     parser.add_argument("--workspace", default="blueleaf")
     parser.add_argument("--k", type=int, default=5)
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
                           "documents": results}, indent=2))
         return 0
 
-    print(f"blos find · {args.query!r} · {len(results)} docs · {elapsed_ms:.0f}ms")
+    print(f"heydey find · {args.query!r} · {len(results)} docs · {elapsed_ms:.0f}ms")
     for i, doc in enumerate(results, 1):
         name = (doc["path"] or doc["source"]).rsplit("/", 1)[-1]
         score = f"{doc['best_score']:.3f}" if doc["best_score"] is not None else "—"

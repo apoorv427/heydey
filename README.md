@@ -30,6 +30,28 @@ and verification state behind every AI action, which is normally invisible.
   artifact engine, and MCP host are all hand-built. No langchain / langgraph / crewai /
   autogen; no Docker / Redis / Postgres / hosted vector DB — the ban is enforced by a CI grep.
 
+## The receipt, in 30 seconds
+
+Ask it about its own docs — this is real output, unedited (paths trimmed):
+
+```text
+Q: What is the cross-model validator rule in Heydey?
+
+[Doc: HEYDEY-EXECUTOR-CONTRACTS | Section: A. The cross-model validator gate]
+"…the validator (a model of a **different family** than the executor) is asked:
+ does this sentence's assertion follow from the supplied chunks? …
+ the router refuses same-family at config-write."
+
+[KB: HEYDEY-EXECUTOR-CONTRACTS.md · chunk 3 · score 0.833]
+[KB: HEYDEY-EXECUTOR-CONTRACTS.md · chunk 2 · score 0.816]
+[KB: HEYDEY-BUILD-DOC-FINAL.md    · chunk 28 · score 0.754]
+
+badge: deepseek/deepseek-chat → qwen3:8b · PASS   ·   $0.0004 · 0 ungrounded
+```
+
+Ask it something the corpus can't support, and it answers
+**"The records don't cover this yet."** — the refusal *is* the feature.
+
 ## What you can do with it
 
 **The hero flow — run your product org's memory (an AI Product Manager's setup):**
@@ -86,19 +108,18 @@ a DPDP-style local-only egress switch · a Next.js instrument UI (Ask · Today �
 Models · Agents · Connectors) where every surface ships four states (loaded / empty / error /
 ingesting).
 
-**Next:** arbitrary-folder ingestion so any Mac can become a workspace (today's corpus wiring
-is being moved from hardcoded paths to config) · real OAuth connectors (the three shipped
-connectors are synthetic **demo** MCP servers that exercise the security pipeline) · the
-cross-family judge as the enforced default eval gate.
+**Next:** a `heydey init` wizard over the shipped config path (any folder already ingests via
+`~/.heydey/corpus.json` — the wizard adds ergonomics and a timed stranger-gate) · real OAuth
+connectors (the three shipped connectors are synthetic **demo** MCP servers that exercise the
+security pipeline) · the cross-family judge as the enforced default eval gate.
 
 ## Quickstart
 
-See **[INSTALL.md](INSTALL.md)** — honestly, **~15–20 minutes**, founder-measured on a clean
-environment: **≈10 minutes to the first cited, gate-checked answer** (fresh venv → ingest →
-the default retrieval gate GREEN with zero source edits; the optional local-LLM pulls for the
-synthesis lane add the rest): 3 prerequisites
-(Python 3.12 · Node · [Ollama](https://ollama.com)) + 8 steps, including two
-multi-GB local-model pulls. **No cloud account, no Docker, and no API key are
+See **[INSTALL.md](INSTALL.md)** — honestly, **~15–20 minutes**: 3 prerequisites
+(Python 3.12 · Node · [Ollama](https://ollama.com)) + 8 steps, including two multi-GB
+local-model pulls. Founder-measured on a clean environment: **≈10 minutes to the first
+cited, gate-checked answer** — fresh venv → ingest → the default retrieval gate GREEN,
+zero source edits (the local-LLM pulls for the synthesis lane account for the rest). **No cloud account, no Docker, and no API key are
 required for the $0 local-only mode**, which makes zero network calls. If it
 worked for you, say so in the ["it worked" thread](../../issues) — with a
 zero-telemetry product, that's the only way we ever know.
