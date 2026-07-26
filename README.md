@@ -70,7 +70,7 @@ falsifiable gate — a command, a test, or a stopwatch — not a claim.
 
 | Proof | State |
 |---|---|
-| Test suite | **223 / 223 passing** |
+| Test suite | **225 / 225 passing** |
 | Gate runners (retrieval · validator · isolation · auth · secrets · egress · connectors · foundry) | **11 / 11 green** |
 | Retrieval gate (S2) | two documented hard-query failures now return the correct chunk **top-3** with a working breadcrumb |
 | Cross-model validator (S3) | adversarial eval, **0 fabrications** (deterministic probe); cross-family judge being promoted to the default eval gate |
@@ -93,7 +93,10 @@ cross-family judge as the enforced default eval gate.
 
 ## Quickstart
 
-See **[INSTALL.md](INSTALL.md)** — honestly, **~15–20 minutes**: 3 prerequisites
+See **[INSTALL.md](INSTALL.md)** — honestly, **~15–20 minutes**, founder-measured on a clean
+environment: **≈10 minutes to the first cited, gate-checked answer** (fresh venv → ingest →
+the default retrieval gate GREEN with zero source edits; the optional local-LLM pulls for the
+synthesis lane add the rest): 3 prerequisites
 (Python 3.12 · Node · [Ollama](https://ollama.com)) + 8 steps, including two
 multi-GB local-model pulls. **No cloud account, no Docker, and no API key are
 required for the $0 local-only mode**, which makes zero network calls. If it
