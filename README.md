@@ -1,6 +1,15 @@
-# Heydey
+<p align="center">
+  <img src="docs/assets/heydey-banner.svg" alt="Heydey — a local-first, proof-grade AI operating system. It does the work and shows its receipts." width="100%">
+</p>
 
-**A local-first, proof-grade AI operating system — it does the work and shows its receipts.**
+<p align="center">
+  <a href="https://github.com/apoorv427/heydey/actions/workflows/tests.yml"><img src="https://github.com/apoorv427/heydey/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/tests-278%2F278-4FD8C4?labelColor=0D1426" alt="tests 278/278">
+  <img src="https://img.shields.io/badge/gates-11%2F11%20green-4FD8C4?labelColor=0D1426" alt="gates 11/11 green">
+  <img src="https://img.shields.io/badge/local--first-%240%20mode-6FCFA9?labelColor=0D1426" alt="local-first, $0 mode">
+  <img src="https://img.shields.io/badge/agent%20frameworks-0-8A94A8?labelColor=0D1426" alt="zero agent frameworks">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8A94A8?labelColor=0D1426" alt="MIT license"></a>
+</p>
 
 *Your Mac, unchanged — with a brain underneath.*
 
@@ -51,6 +60,43 @@ badge: deepseek/deepseek-chat → qwen3:8b · PASS   ·   $0.0004 · 0 ungrounde
 
 Ask it something the corpus can't support, and it answers
 **"The records don't cover this yet."** — the refusal *is* the feature.
+
+## How an answer is earned
+
+Every path below is code in this repo, not a diagram of intent — the fail-closed
+branch on the right is why the refusal above happens.
+
+```mermaid
+flowchart TD
+    A["Your files<br/>PRDs · interviews · notes · decisions"] --> B["Ingest<br/>PII scrub + injection guard"]
+    B --> C[("One SQLite file<br/>per workspace")]
+    Q(["Your question"]) --> R["Hybrid retrieval<br/>sqlite-vec + FTS5 · RRF fusion"]
+    C --> R
+    R --> X["Executor model<br/>writes the answer"]
+    X --> V{"Validator model — different family,<br/>enforced at config-write<br/>every claim vs. the retrieved chunks"}
+    V -->|all claims grounded| P["Cited answer<br/>receipt per sentence"]
+    V -->|any claim unproven| F["Retry once, then extractive, then<br/>'The records don't cover this yet.'"]
+    P --> L[("Receipt ledger<br/>source · chunk · score · PASS/FAIL · model · cost")]
+    F --> L
+    P --> T{"Taking an action?<br/>risk tier decides"}
+    T -->|read| L
+    T -->|write_local · exec · external| AP["Approval tray<br/>prepared action — nothing fires silently"]
+    AP --> L
+
+    classDef store fill:#111a2e,stroke:#4FD8C4,color:#E6EAF2
+    classDef node fill:#0D1426,stroke:#1C2436,color:#E6EAF2
+    classDef gate fill:#12233a,stroke:#4FD8C4,color:#E6EAF2
+    classDef pass fill:#0D1426,stroke:#4FD8C4,color:#4FD8C4
+    classDef refuse fill:#0D1426,stroke:#E8A13C,color:#E8A13C
+    class A,B,Q,R,X,AP node
+    class C,L store
+    class V,T gate
+    class P pass
+    class F refuse
+```
+
+A **local-only** profile runs that entire loop on your machine at **$0** — no bytes leave,
+and the egress switch is enforced in code, not in a setting you have to trust.
 
 ## What you can do with it
 
