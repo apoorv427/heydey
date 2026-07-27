@@ -7,11 +7,17 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
+      # setup-python's macOS builds ship sqlite3 WITHOUT loadable-extension
+      # support (no Connection.enable_load_extension), so sqlite-vec can never
+      # load and the vector-store tests all error. Homebrew's python3.12 is
+      # compiled with it — the same interpreter family the dev machines use.
+      - name: Python 3.12 with sqlite extension loading (Homebrew)
+        run: |
+          brew list python@3.12 >/dev/null 2>&1 || brew install -q python@3.12
+          "$(brew --prefix)/bin/python3.12" -c "import sqlite3; assert hasattr(sqlite3.Connection, 'enable_load_extension'), 'sqlite3 built without loadable extensions'"
       - name: Install
         run: |
-          python -m venv api/.venv
+          "$(brew --prefix)/bin/python3.12" -m venv api/.venv
           api/.venv/bin/pip install -e "api[dev]"
       - name: Test (banned-deps grep included)
         run: api/.venv/bin/python -m pytest api/tests -o addopts="" -q

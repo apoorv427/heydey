@@ -1,0 +1,48 @@
+{
+  "connector_id": "google-workspace",
+  "title": "Google Workspace",
+  "connector_class": "oauth",
+  "auth": {
+    "kind": "oauth_pkce",
+    "auth_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_endpoint": "https://oauth2.googleapis.com/token",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/calendar.readonly"
+    ],
+    "extra_authorize_params": {
+      "access_type": "offline",
+      "prompt": "consent"
+    }
+  },
+  "server_command": null,
+  "tools": [
+    {
+      "name": "drive_search_files",
+      "description": "Search Drive files by name or content",
+      "risk_tier": "read"
+    },
+    {
+      "name": "drive_get_file",
+      "description": "Get one Drive file's text content",
+      "risk_tier": "read"
+    },
+    {
+      "name": "gmail_search_messages",
+      "description": "Search Gmail messages by query",
+      "risk_tier": "read"
+    },
+    {
+      "name": "gmail_get_message",
+      "description": "Get one Gmail message body",
+      "risk_tier": "read"
+    },
+    {
+      "name": "calendar_list_events",
+      "description": "List upcoming Calendar events",
+      "risk_tier": "read"
+    }
+  ],
+  "notes": "Read-only v1. Scopes are all *.readonly by design — a write scope may only arrive together with an external-tier tool entry, which the tray will gate. server_command activates with the live leg once a GCP OAuth client (Desktop type) is configured; until then this manifest drives consent-URL building, token exchange/refresh, and registration only."
+}

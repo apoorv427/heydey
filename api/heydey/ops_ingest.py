@@ -38,20 +38,39 @@ DENY_NAMES = {"MEMORY.md"}
 MAX_BYTES = 1_000_000
 
 
-def _config_sources() -> list[tuple[Path, str]]:
-    cfg = config.load_corpus_config()
+def _workspace_block(workspace_id: str | None) -> dict | None:
+    """The per-workspace corpus block (W3-B5): ``corpus.json`` may carry
+    ``"workspaces": {"<id>": {"sources": [...], "deny_names": [...]}}``.
+    A block is that workspace's WHOLE source list — it never unions with the
+    flat ``sources`` key, so an external client's workspace can't silently
+    inherit the operator's own folders. Flat ``sources`` stays the fallback
+    for block-less workspaces (single-user installs keep working unchanged)."""
+    if not workspace_id:
+        return None
+    blocks = config.load_corpus_config().get("workspaces") or {}
+    block = blocks.get(workspace_id)
+    return block if isinstance(block, dict) else None
+
+
+def _config_sources(workspace_id: str | None = None) -> list[tuple[Path, str]]:
+    block = _workspace_block(workspace_id)
+    entries = (block.get("sources", []) if block is not None
+               else config.load_corpus_config().get("sources", []))
     return [
         (Path(s["root"]).expanduser(), s.get("glob", "*.md"))
-        for s in cfg.get("sources", [])
+        for s in entries
     ]
 
 
-def _active_sources() -> list[tuple[Path, str]]:
-    return CORPUS_SOURCES if CORPUS_SOURCES is not None else _config_sources()
+def _active_sources(workspace_id: str | None = None) -> list[tuple[Path, str]]:
+    return CORPUS_SOURCES if CORPUS_SOURCES is not None else _config_sources(workspace_id)
 
 
-def _deny_names() -> set[str]:
-    return DENY_NAMES | set(config.load_corpus_config().get("deny_names", []))
+def _deny_names(workspace_id: str | None = None) -> set[str]:
+    cfg = config.load_corpus_config()
+    block = _workspace_block(workspace_id)
+    return (DENY_NAMES | set(cfg.get("deny_names", []))
+            | set((block or {}).get("deny_names", [])))
 
 
 def _excluded(path: Path, deny: set[str] | None = None) -> bool:
@@ -62,10 +81,10 @@ def _excluded(path: Path, deny: set[str] | None = None) -> bool:
     return any(part.lower() == "personal" for part in path.parts)
 
 
-def iter_corpus_files() -> list[Path]:
-    deny = _deny_names()
+def iter_corpus_files(workspace_id: str | None = None) -> list[Path]:
+    deny = _deny_names(workspace_id)
     seen: set[Path] = set()
-    for root, pattern in _active_sources():
+    for root, pattern in _active_sources(workspace_id):
         if not root.exists():
             continue
         for path in sorted(root.glob(pattern)):
@@ -79,7 +98,7 @@ def ingest_ops_corpus(workspace_id: str) -> dict:
     report = {"files": 0, "chunks": 0, "entities": 0, "pii_redactions": 0,
               "flagged_chunks": 0, "skipped": [], "errors": []}
     try:
-        for path in iter_corpus_files():
+        for path in iter_corpus_files(workspace_id):
             try:
                 if path.stat().st_size > MAX_BYTES:
                     report["skipped"].append(f"{path} (> {MAX_BYTES} bytes)")
@@ -120,7 +139,13 @@ _EXAMPLE_CONFIG = """{
     {"root": "~/Documents/company-docs", "glob": "**/*.md"},
     {"root": "~/Documents/decisions",    "glob": "*.md"}
   ],
-  "deny_names": ["private-notes.md"]
+  "deny_names": ["private-notes.md"],
+  "workspaces": {
+    "client-a": {
+      "sources": [{"root": "~/Clients/a-docs", "glob": "**/*.md"}],
+      "deny_names": ["a-contract-draft.md"]
+    }
+  }
 }"""
 
 
@@ -128,7 +153,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", default="blueleaf")
     args = parser.parse_args()
-    if not _active_sources():
+    if not _active_sources(args.workspace):
         print(
             f"No corpus sources configured.\n"
             f"Create {config.corpus_config_path()} (see INSTALL.md), e.g.:\n{_EXAMPLE_CONFIG}",

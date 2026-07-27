@@ -22,7 +22,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config
+from . import config, risk
 
 VALID_DECISIONS = {"approved", "denied"}
 
@@ -37,11 +37,14 @@ def generate_shopify_admin_url(store_handle: str, product_id: str | int) -> str:
 
 
 def create_approval(conn: sqlite3.Connection, *, action_class: str, payload: dict,
-                    run_id: str = "") -> int:
+                    run_id: str = "", risk_tier: str = "") -> int:
+    """Every prepared action carries a 4-tier risk label (W2). Callers that
+    don't say default to ``external`` — the top tier, fail closed."""
+    tier = risk.validate_tier(risk_tier) if risk_tier else risk.EXTERNAL
     cursor = conn.execute(
-        "INSERT INTO approvals(run_id, action_class, payload, status, requested_at)"
-        " VALUES (?,?,?,?,?)",
-        (run_id, action_class, json.dumps(payload), "pending",
+        "INSERT INTO approvals(run_id, action_class, risk_tier, payload, status, requested_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (run_id, action_class, tier, json.dumps(payload), "pending",
          datetime.now(timezone.utc).isoformat(timespec="seconds")),
     )
     conn.commit()
@@ -50,12 +53,12 @@ def create_approval(conn: sqlite3.Connection, *, action_class: str, payload: dic
 
 def pending(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, run_id, action_class, payload, status, requested_at"
+        "SELECT id, run_id, action_class, risk_tier, payload, status, requested_at"
         " FROM approvals WHERE status = 'pending' ORDER BY id DESC"
     ).fetchall()
     return [
-        {"id": r[0], "run_id": r[1], "action_class": r[2], "payload": json.loads(r[3]),
-         "status": r[4], "requested_at": r[5]}
+        {"id": r[0], "run_id": r[1], "action_class": r[2], "risk_tier": r[3],
+         "payload": json.loads(r[4]), "status": r[5], "requested_at": r[6]}
         for r in rows
     ]
 
@@ -77,7 +80,10 @@ def seed_demo_sku_approval(conn: sqlite3.Connection) -> int:
              "return_rate": 9.8, "units_30d": 190},
         ],
     }
-    return create_approval(conn, action_class="outbound", payload=payload)
+    # The prepared-action pattern IS write_local: artifact + deep-link on this
+    # machine, no connector write fired — the canonical example of the tier.
+    return create_approval(conn, action_class="outbound", payload=payload,
+                           risk_tier=risk.WRITE_LOCAL)
 
 
 def _execute_sku_suppression(workspace_id: str, payload: dict) -> dict:
@@ -124,7 +130,8 @@ def decide(conn: sqlite3.Connection, approval_id: int, decision: str, *,
     if decision not in VALID_DECISIONS:
         raise ApprovalError(f"decision must be one of {sorted(VALID_DECISIONS)}")
     row = conn.execute(
-        "SELECT status, payload, action_class FROM approvals WHERE id = ?", (approval_id,)
+        "SELECT status, payload, action_class, risk_tier FROM approvals WHERE id = ?",
+        (approval_id,)
     ).fetchone()
     if row is None:
         raise ApprovalError(f"approval {approval_id} not found")
@@ -132,6 +139,7 @@ def decide(conn: sqlite3.Connection, approval_id: int, decision: str, *,
         raise ApprovalError(f"approval {approval_id} already {row[0]} — decisions are single-shot")
 
     payload = json.loads(row[1])
+    tier = row[3] or risk.EXTERNAL  # pre-taxonomy rows decide at the top tier
     resolved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     result: dict = {}
 
@@ -144,12 +152,13 @@ def decide(conn: sqlite3.Connection, approval_id: int, decision: str, *,
         artifact_note = f" · artifact {Path(artifact).name}" if artifact else ""
         conn.execute(
             "INSERT INTO receipts(run_id, sentence_index, claim_text, doc_id, chunk_id,"
-            " retrieval_score, confidence_band, validator_pass, model, tokens, cost_usd, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " retrieval_score, confidence_band, validator_pass, model, tokens, cost_usd,"
+            " risk_tier, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (f"approval-{approval_id}", 0,
              f"prepared-action {payload.get('kind')}: {payload.get('title', '')} · "
-             f"approved by {actor}{artifact_note} · no write fired",
-             artifact, "", None, "action", None, "none", None, 0.0, resolved_at),
+             f"approved by {actor}{artifact_note} · risk {tier} · no write fired",
+             artifact, "", None, "action", None, "none", None, 0.0, tier, resolved_at),
         )
 
     conn.execute(
@@ -158,4 +167,4 @@ def decide(conn: sqlite3.Connection, approval_id: int, decision: str, *,
     )
     conn.commit()
     return {"id": approval_id, "status": decision, "resolved_at": resolved_at,
-            "actor": actor, **result}
+            "actor": actor, "risk_tier": tier, **result}

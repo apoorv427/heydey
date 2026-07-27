@@ -25,7 +25,7 @@ import hashlib
 import json
 import sqlite3
 
-from . import approvals
+from . import approvals, risk
 
 SECTION = "d2c-ops"
 # The stable citation for every d2c line — the tool the numbers come from. The
@@ -148,4 +148,6 @@ def suppression_approval(conn: sqlite3.Connection, workspace_id: str,
         "skus": skus,
         "source": SOURCE_CRUMB,
     }
-    return approvals.create_approval(conn, action_class="outbound", payload=payload)
+    # prepared action = artifact + deep-link on this machine only -> write_local
+    return approvals.create_approval(conn, action_class="outbound", payload=payload,
+                                     risk_tier=risk.WRITE_LOCAL)

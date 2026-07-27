@@ -92,10 +92,13 @@ falsifiable gate — a command, a test, or a stopwatch — not a claim.
 
 | Proof | State |
 |---|---|
-| Test suite | **227 / 227 passing** |
+| Test suite | **261 / 261 passing** |
 | Gate runners (retrieval · validator · isolation · auth · secrets · egress · connectors · foundry) | **11 / 11 green** |
 | Retrieval gate (S2) | two documented hard-query failures now return the correct chunk **top-3** with a working breadcrumb |
-| Cross-model validator (S3) | adversarial eval, **0 fabrications** (deterministic probe); cross-family judge being promoted to the default eval gate |
+| Cross-model validator (S3) | adversarial 50-prompt eval re-run 2026-07-27: **0 ungrounded · 0 fabrications** (every answer cleared the deterministic verbatim audit); a cross-family judge (deepseek) is the default second layer when determinism can't decide |
+| Action-risk taxonomy (W2) | every tool + prepared action carries a tier (**read / write_local / exec / external**); anything non-read requires an approved tray row; the tier lands on the receipt row |
+| OAuth connector plumbing (W2) | PKCE consent → token exchange → refresh in the OS Keychain (RFC-7636 vector-tested, mocked endpoints); Google Workspace read-only manifest; **live leg activates with real client credentials** |
+| Per-workspace corpus blocks (W3) | a client workspace ingests **only its own block** — proven end-to-end: two workspaces, two db files, disjoint corpora |
 | Secrets in tree or git history | **0** |
 | Banned dependencies | **0** (CI-enforced) |
 
@@ -111,7 +114,9 @@ ingesting).
 **Just landed:** **`heydey init`** — folders → workspace → ingest → retrieval gate → **TTFR
 printed** (measured on a fresh environment: **2.9 minutes** to a cited, gate-checked answer) ·
 the eval judge now defaults to a **third model family** (deepseek), with a loud warning on any
-same-family fallback.
+same-family fallback · the **4-tier action-risk taxonomy** and **OAuth + PKCE plumbing** for the
+first real connector (Google Workspace, read-only — goes live when the OAuth client credentials
+do) · **per-workspace corpus blocks** for multi-client installs.
 
 **Next:** real OAuth connectors (the three shipped connectors are synthetic **demo** MCP
 servers that exercise the security pipeline) · the validator-independence experiment

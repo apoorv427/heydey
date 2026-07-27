@@ -41,6 +41,7 @@ def test_synthesized_pass_writes_receipts(conn):
     assert r.validator_pass is True
     assert r.ungrounded_count == 0
     assert r.receipts and r.receipts[0]["validator_pass"] == 1
+    assert r.receipts[0]["risk_tier"] == "read"  # answers are read-class (W2)
     # receipt persisted to the ledger
     n = conn.execute("SELECT COUNT(*) FROM receipts WHERE run_id=?", (r.run_id,)).fetchone()[0]
     assert n >= 1

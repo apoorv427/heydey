@@ -138,15 +138,17 @@ def _write_receipts(conn, run_id, final_val, hits, executor_model, cost) -> list
             "run_id": run_id, "sentence_index": v.sentence_index, "claim_text": v.claim,
             "doc_id": doc_id, "chunk_id": chunk_id, "retrieval_score": score,
             "confidence_band": band(v.confidence), "validator_pass": int(v.grounded),
-            "model": executor_model, "cost_usd": cost,
+            "model": executor_model, "cost_usd": cost, "risk_tier": "read",
         }
         receipts.append(row)
         conn.execute(
             "INSERT INTO receipts(run_id, sentence_index, claim_text, doc_id, chunk_id, "
-            "retrieval_score, confidence_band, validator_pass, model, cost_usd, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "retrieval_score, confidence_band, validator_pass, model, cost_usd, risk_tier, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            # answers are read-class activity — every receipt row carries a tier (W2)
             (run_id, v.sentence_index, v.claim, doc_id, chunk_id, score, band(v.confidence),
-             int(v.grounded), executor_model, cost, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+             int(v.grounded), executor_model, cost, "read",
+             datetime.now(timezone.utc).isoformat(timespec="seconds")),
         )
     conn.commit()
     return receipts

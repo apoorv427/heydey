@@ -34,7 +34,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 
-from . import connectors, graph, slicer
+from . import connector_manifest, connectors, graph, slicer
 from .ingest_guard import guard_chunks
 from .mcp_host import MCPHost
 from .vector_store import delete_document, store_chunks
@@ -99,12 +99,20 @@ def sync(conn: sqlite3.Connection, workspace_id: str, connector_id: str,
     if connectors.get(conn, workspace_id, connector_id) is None:
         connectors.register(conn, workspace_id, connector_id)
 
+    # Manifest tiers, when this connector has a first-party manifest (W2) —
+    # demo connectors don't, and pure verb-shape inference covers them.
+    try:
+        declared = connector_manifest.declared_tiers(
+            connector_manifest.load_manifest(connector_id))
+    except connector_manifest.ManifestError:
+        declared = None
+
     tools_pulled = chunks = flagged = entities = 0
     with MCPHost(workspace_id=workspace_id, connector_id=connector_id,
-                 command=command) as host:
+                 command=command, declared_tiers=declared) as host:
         for tool in host.list_tools():
-            if tool["approval_class"] != "none":
-                continue  # Layer 2: write/spend tools never auto-run on a sync
+            if tool["approval_class"] != "none" or tool["risk_tier"] != "read":
+                continue  # Layer 2: only read-tier pull tools auto-run on a sync
             name = tool["name"]
             try:
                 result = host.call_tool(conn, name)  # already guarded (Layer 1)

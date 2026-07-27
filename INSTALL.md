@@ -57,6 +57,23 @@ Your folders are **machine-local config, never code**. Create
 - `deny_names` — filenames that must never enter any corpus, on top of the
   built-in structural wall: anything under a `Personal/` directory and any
   filename containing "personal" is always excluded.
+- `workspaces` (optional) — per-workspace corpus blocks for multi-client
+  installs:
+
+  ```json
+  "workspaces": {
+    "client-a": {
+      "sources": [{"root": "~/Clients/a-docs", "glob": "**/*.md"}],
+      "deny_names": ["a-contract-draft.md"]
+    }
+  }
+  ```
+
+  A workspace with a block ingests ONLY its block's sources — it never
+  inherits the flat `sources` list, so a client workspace cannot silently
+  pick up your own folders (`--workspace client-a` routes it). Workspaces
+  without a block keep using the flat `sources`. Block `deny_names` merge
+  with the global list, and the `Personal/` wall applies inside blocks too.
 - Optional keys: `reveal_roots` (extra folders receipts may open into — source
   roots and the repo are always allowed), `blos_source` / `golden_set`
   (only for migrating an existing store; skip on a fresh install).

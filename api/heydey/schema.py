@@ -19,7 +19,7 @@ Migration is versioned via schema_meta and idempotent (IF NOT EXISTS throughout)
 import sqlite3
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 4  # v4 (S6c): + foundry_events — Architect onboarding stopwatch instrument
+SCHEMA_VERSION = 5  # v5 (W2): + risk_tier on approvals/receipts — 4-tier action taxonomy in the audit trail
 
 VECTOR_SIZE = 384  # BAAI/bge-small-en-v1.5 — same embedder as the migrating KB
 
@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     model           TEXT,
     tokens          INTEGER,
     cost_usd        REAL,
+    risk_tier       TEXT,   -- read | write_local | exec | external (W2; NULL = pre-taxonomy row)
     created_at      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_receipts_run ON receipts(run_id);
@@ -141,6 +142,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     id           INTEGER PRIMARY KEY,
     run_id       TEXT,
     action_class TEXT,   -- outbound | spend | destructive
+    risk_tier    TEXT,   -- read | write_local | exec | external (W2; NULL = pre-taxonomy row)
     payload      TEXT,
     status       TEXT,   -- pending | approved | denied
     requested_at TEXT,
@@ -234,9 +236,20 @@ CREATE TABLE IF NOT EXISTS foundry_events (
 """
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    """ALTER-in a column on dbs born before it existed (IF NOT EXISTS can't)."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     """Bring a workspace db to the current schema. Idempotent; safe on every open."""
     conn.executescript(_DDL)
+    # v5: risk_tier lands on pre-existing workspaces; old rows stay NULL (honest —
+    # they predate the taxonomy) while every new row carries its tier.
+    _ensure_column(conn, "approvals", "risk_tier", "TEXT")
+    _ensure_column(conn, "receipts", "risk_tier", "TEXT")
     conn.execute(
         "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",

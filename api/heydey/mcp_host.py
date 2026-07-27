@@ -28,6 +28,7 @@ import threading
 from dataclasses import dataclass, field
 
 from . import approvals as approvals_mod
+from . import risk
 from .ingest_guard import guard_mcp_result
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -69,6 +70,9 @@ class MCPHost:
     connector_id: str
     command: list[str]
     timeout: float = 20.0
+    # name -> tier from the connector's manifest (W2). resolve_tier means a
+    # declaration can only raise risk above verb-shape inference, never lower it.
+    declared_tiers: dict[str, str] | None = None
     _proc: subprocess.Popen | None = None
     _tools: dict[str, dict] = field(default_factory=dict)
     _next_id: int = 0
@@ -154,11 +158,14 @@ class MCPHost:
         result = self._request("tools/list", {})
         manifest = []
         for tool in result.get("tools", []):
+            name = tool.get("name", "")
+            description = tool.get("description", "")
             entry = {
-                "name": tool.get("name", ""),
-                "description": tool.get("description", ""),
-                "approval_class": classify_tool(tool.get("name", ""),
-                                                tool.get("description", "")),
+                "name": name,
+                "description": description,
+                "approval_class": classify_tool(name, description),
+                "risk_tier": risk.resolve_tier(
+                    (self.declared_tiers or {}).get(name), name, description),
             }
             self._tools[entry["name"]] = entry
             manifest.append(entry)
@@ -178,10 +185,13 @@ class MCPHost:
         if tool is None:
             raise MCPHostError(f"unknown tool {name!r} on {self.connector_id}")
 
-        if tool["approval_class"] != "none":
+        # Union of both gates, fail closed: the legacy approval class AND the
+        # 4-tier taxonomy each independently force the tray (W2 — no relaxation).
+        if tool["approval_class"] != "none" or risk.requires_approval(tool["risk_tier"]):
             if approval_id is None:
                 raise ApprovalRequired(
-                    f"{name} is {tool['approval_class']}-classed — a tray approval is required")
+                    f"{name} is {tool['approval_class']}-classed / risk "
+                    f"{tool['risk_tier']} — a tray approval is required")
             row = conn.execute("SELECT status FROM approvals WHERE id=?", (approval_id,)).fetchone()
             if row is None or row[0] != "approved":
                 raise ApprovalRequired(
@@ -194,4 +204,5 @@ class MCPHost:
         )
         guarded = guard_mcp_result(conn, f"{self.workspace_id}.{self.connector_id}", name, raw)
         guarded["approval_class"] = tool["approval_class"]
+        guarded["risk_tier"] = tool["risk_tier"]
         return guarded
