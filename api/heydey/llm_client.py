@@ -177,7 +177,20 @@ def _call_openrouter(model, prompt, system, max_tokens, temperature, timeout) ->
         raise LLMError(f"openrouter HTTP {exc.code} ({model}): {exc.read().decode(errors='replace')[:200]}") from exc
     except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
         raise LLMError(f"openrouter unreachable ({model}): {exc}") from exc
-    content = data["choices"][0]["message"]["content"]
+    # OpenRouter can return HTTP 200 with an ERROR body (rate limits, provider
+    # failures) — found live when a mid-run response killed the B7 experiment
+    # with a bare KeyError. Surface the provider's message, fail closed.
+    choices = data.get("choices")
+    if not choices:
+        err = data.get("error") or {}
+        raise LLMError(
+            f"openrouter error ({model}): {err.get('message') or json.dumps(data)[:200]}"
+            f" (code {err.get('code')})")
+    try:
+        content = choices[0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError) as exc:
+        raise LLMError(
+            f"openrouter malformed response ({model}): {json.dumps(data)[:200]}") from exc
     usage = data.get("usage", {})
     return content, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 

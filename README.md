@@ -92,7 +92,7 @@ falsifiable gate — a command, a test, or a stopwatch — not a claim.
 
 | Proof | State |
 |---|---|
-| Test suite | **261 / 261 passing** |
+| Test suite | **278 / 278 passing** |
 | Gate runners (retrieval · validator · isolation · auth · secrets · egress · connectors · foundry) | **11 / 11 green** |
 | Retrieval gate (S2) | two documented hard-query failures now return the correct chunk **top-3** with a working breadcrumb |
 | Cross-model validator (S3) | adversarial 50-prompt eval re-run 2026-07-27: **0 ungrounded · 0 fabrications** (every answer cleared the deterministic verbatim audit); a cross-family judge (deepseek) is the default second layer when determinism can't decide |
@@ -120,9 +120,12 @@ do) · **per-workspace corpus blocks** for multi-client installs · the **AI-PM 
 the hero flow above — doc-driven Morning-Brief section, the three-agent fleet, and the
 PRD-section prepared action (verbatim quotes only, `write_local`, receipt attached).
 
-**Next:** real OAuth connectors (the three shipped connectors are synthetic **demo** MCP
-servers that exercise the security pipeline) · the validator-independence experiment
-(checker gets its own retrieval pass; measured delta published).
+**Next:** real OAuth connectors going live (the three shipped connectors are synthetic
+**demo** MCP servers that exercise the security pipeline; the OAuth plumbing is built and
+credential-gated) · a *strict* profile hardened by independent per-claim retrieval — the
+[validator-independence experiment](docs/B7-VALIDATOR-INDEPENDENCE-2026-07-27.md) measured
+the shared-input blind spot at ≈4.7% of claims, with the independent pass never rescuing a
+failure (0 the other way).
 
 ## Quickstart
 
