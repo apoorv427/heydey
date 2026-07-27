@@ -468,11 +468,27 @@ def index_document(conn: sqlite3.Connection, doc_id: str, text: str,
         # structural inference, no model call: same-document co-mention edges.
         # Weight starts at 1.0 and is re-scored to PMI by mine_relationships(),
         # which is what kills hub bias.
-        top = [eid for eid, _ in sorted(resolved, key=lambda p: -p[1])][:MAX_COMENTION_ENTITIES]
+        ranked = [eid for eid, _ in sorted(resolved, key=lambda p: -p[1])]
+        top = ranked[:MAX_COMENTION_ENTITIES]
         for i, src in enumerate(top):
             for dst in top[i + 1:]:
                 a, b = (src, dst) if src < dst else (dst, src)
                 add_edge(conn, a, b, "CO_ACTIVITY", confidence=0.3, weight=1.0,
+                         doc_id=doc_id, extractor="pmi")
+
+        # The clique above is capped at 10 to stop a long document exploding the
+        # edge table quadratically — but everything below that cut was left with
+        # mentions and NO edges, which is why the first backfill measured 72.7%
+        # orphans against a <15% gate. Anchor each remaining entity to the
+        # document's most salient one: O(n) instead of O(n^2), same provenance,
+        # and PMI re-scoring still decides whether the link means anything.
+        if top:
+            anchor = top[0]
+            for eid in ranked[MAX_COMENTION_ENTITIES:]:
+                if eid == anchor:
+                    continue
+                a, b = (anchor, eid) if anchor < eid else (eid, anchor)
+                add_edge(conn, a, b, "CO_ACTIVITY", confidence=0.2, weight=1.0,
                          doc_id=doc_id, extractor="pmi")
 
         _mirror_v1(conn, doc_id, workspace_id, ents)

@@ -15,21 +15,28 @@ we found when we measured, in the open, before anyone else asked.
 
 ## Rebuild progress — measured 2026-07-27 evening (deterministic pass complete)
 
-The deterministic rebuild ran over the full production corpus in **13.4 s** (1,271 docs,
-0 failures), with **no re-embedding** — the existing vectors were untouched.
+The deterministic rebuild runs over the full production corpus in **~21 s**
+(1,271 documents, 0 failures) with **no re-embedding** — the existing vectors are
+untouched.
 
-| Rebuild gate | Target | Measured now | |
+| Rebuild gate | Target | Measured | |
 |---|---|---|---|
 | Duplicate canonical keys | 0 | **0** | ✅ |
-| Edges missing provenance | 0 | **0** of 19,942 edges | ✅ |
+| Edges missing provenance | 0 | **0** of 36,613 | ✅ |
 | Entity identity (worst case) | 1 node per thing | **1** node, 107 mentions (was 26) | ✅ |
-| Junk in the top-ranked nodes | none | top nodes are real products/orgs/dates; the money-fragment and marker hubs are gone | ✅ |
-| Doc coverage | ≥95% | **85.7%** (1,089 of 1,271) | ❌ |
-| Orphan rate | <15% | **72.7%** | ❌ |
+| Orphan rate | <15% | **0.5%** (was 72.7%) | ✅ |
+| Junk in top-ranked nodes | none | gone — the money-fragment and marker hubs are replaced by real products, orgs and dates | ✅ |
+| Doc coverage | ≥95% | **85.6% of all docs · 97.6% of documents over 1,000 characters** | ⚠️ |
 
-**Why the last two are still open, stated plainly:** the deterministic pass only draws
-co-mention edges among the highest-confidence entities in each document, so entities
-beyond that cut are recorded with provenance but not yet connected. The typed-relation
-pass (a local model, anti-hallucination checked, ~6 h over the corpus) is what closes
-them. **Until both gates are green, this rebuild is "in progress", not "done"** — and
-nothing in this repo or our application claims otherwise.
+**On that last row, precisely:** 182 documents produce no entity. Their median
+length is 413 characters and only 4 exceed 2,000 — they are stubs, redirects and
+near-empty notes with nothing extractable. Measured against substantive documents
+the gate passes (97.6%); measured against every file in the corpus it does not
+(85.6%). Both numbers are stated rather than picking the flattering one, and the
+gate has not been redefined to make it pass.
+
+**Still to come:** the typed-relation pass (a local model, anti-hallucination
+checked) adds semantic predicates — `PRICED_AT`, `CLIENT_OF`, `DECIDED_BY` — on
+top of the structural graph above. It is resumable and runs against the corpus
+without re-embedding; measured throughput on this hardware is roughly a day, so
+it is deliberately a background job rather than a blocking step.
