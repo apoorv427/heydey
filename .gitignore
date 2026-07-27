@@ -17,3 +17,4 @@ _System/pii-audit.jsonl
 .pytest_cache/
 __pycache__/
 *.pyc
+webapp/tsconfig.tsbuildinfo

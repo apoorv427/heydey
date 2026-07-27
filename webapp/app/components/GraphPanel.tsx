@@ -1,223 +1,447 @@
 "use client";
 
-// F4 — the read-only graph panel (Contract B render spec). Top-50 live entities
-// by activity score; edges = co-retrieval weight. The layout is computed ONCE
-// (static force ticks) — nothing loops except Breath (NOCTURNE). No drag
-// handles. Node click = Z-drill: the entity's receipts + sessions rise below.
+// F4 — the graph, as an instrument you can hold.
+//
+// Was: a static picture (one force pass, then frozen; no drag, no zoom, no
+// typed edges, anonymous grey lines). Now: a live simulation you can grab —
+// drag pins a node where you drop it, wheel/pan/fit/reset move the view, two
+// sliders spread the layout, clicking a node expands its audited 2-hop
+// neighbourhood into the canvas and opens its full profile beside it.
+//
+// This component owns DATA + STATE; components/graph/GraphCanvas owns motion
+// and hit-testing; components/graph/EntityProfile owns "everything about X".
+// Four states, always: loading · empty-with-CTA · error-with-next-step · loaded.
 
-import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from "d3-force";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type Node = { id: number; label: string; type: string | null; score: number };
-type Edge = { source: number; target: number; weight: number; last_seen: string };
-type Health = { entities: number; edges: number; last_grown: string | null };
-type Panel = { nodes: Node[]; edges: Edge[]; health: Health; latency_ms: number };
+import { EntityProfile } from "./graph/EntityProfile";
+import { GraphCanvas } from "./graph/GraphCanvas";
+import {
+  colorFor,
+  edgeKey,
+  typeLabel,
+  type GraphEdge,
+  type GraphNode,
+  type Health,
+  type NeighborRow,
+  type Panel,
+  type Relation,
+} from "./graph/model";
 
-type Positioned = Node & { x: number; y: number; r: number };
-type PlacedEdge = { x1: number; y1: number; x2: number; y2: number; weight: number };
+type Phase = "loading" | "ready" | "empty" | "error";
+type Selection = { id: number; label: string };
 
-type Detail = {
-  id: number;
-  label: string;
-  type: string | null;
-  source_doc_id: string;
-  confidence: number;
-  runs: string[];
-  sessions: { id: string; intent: string; started_at: string; duration: number; cost: number }[];
-  receipts: { run_id: string; claim_text: string; retrieval_score: number | null; created_at: string }[];
+const DEFAULT_LINK_DISTANCE = 108;
+const DEFAULT_CHARGE = -300;
+
+const CONTROL: React.CSSProperties = {
+  background: "rgba(10, 15, 30, 0.65)",
+  border: "1px solid var(--plate-border)",
+  borderRadius: 10,
+  color: "var(--text)",
+  fontSize: 12.5,
+  outline: "none",
+  padding: "7px 10px",
 };
 
-const W = 720;
-const H = 440;
-
-const TYPE_COLOR: Record<string, string> = {
-  project: "var(--conf-validated)",
-  slice: "var(--conf-high)",
-  money: "var(--conf-mid)",
-  lock: "var(--conf-low)",
-  marker: "var(--conf-warn)",
-  proper_noun: "var(--text-muted)",
+const ACTION: React.CSSProperties = {
+  background: "rgba(79,216,196,.10)",
+  border: "1px solid rgba(79,216,196,.35)",
+  borderRadius: 10,
+  color: "var(--conf-validated)",
+  cursor: "pointer",
+  fontSize: 12,
+  padding: "7px 12px",
 };
 
-function layout(nodes: Node[], edges: Edge[]): { placed: Positioned[]; lines: PlacedEdge[] } {
-  const maxScore = Math.max(1, ...nodes.map((n) => n.score));
-  const sims = nodes.map((n) => ({ ...n, r: 5 + 14 * Math.sqrt(n.score / maxScore) }));
-  const links = edges.map((e) => ({ ...e }));
-  const simulation = forceSimulation(sims as never[])
-    .force("link", forceLink(links as never[])
-      .id((d) => (d as unknown as Node).id)
-      .distance((l) => 42 + 70 / Math.sqrt((l as unknown as Edge).weight))
-      .strength(0.5))
-    .force("charge", forceManyBody().strength(-110))
-    .force("center", forceCenter(W / 2, H / 2))
-    // gentle gravity — disconnected components must compose, not flee to corners
-    .force("gx", forceX(W / 2).strength(0.07))
-    .force("gy", forceY(H / 2).strength(0.09))
-    .force("collide", forceCollide((d) => (d as unknown as Positioned).r + 7))
-    .stop();
-  for (let i = 0; i < 300; i += 1) simulation.tick();
-  const placed = (sims as unknown as Positioned[]).map((n) => ({
-    ...n,
-    x: Math.max(n.r + 2, Math.min(W - n.r - 2, n.x)),
-    y: Math.max(n.r + 2, Math.min(H - n.r - 2, n.y)),
-  }));
-  const byId = new Map(placed.map((n) => [n.id, n]));
-  const lines: PlacedEdge[] = (links as unknown as { source: Positioned; target: Positioned; weight: number }[])
-    .map((l) => ({
-      x1: byId.get(l.source.id)?.x ?? 0,
-      y1: byId.get(l.source.id)?.y ?? 0,
-      x2: byId.get(l.target.id)?.x ?? 0,
-      y2: byId.get(l.target.id)?.y ?? 0,
-      weight: l.weight,
-    }));
-  return { placed, lines };
-}
-
-export function GraphPanel() {
-  const [phase, setPhase] = useState<"loading" | "ready" | "empty" | "error">("loading");
+export function GraphPanel({ workspace = "blueleaf" }: { workspace?: string } = {}) {
+  const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState("");
-  const [placed, setPlaced] = useState<Positioned[]>([]);
-  const [lines, setLines] = useState<PlacedEdge[]>([]);
+  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] });
   const [health, setHealth] = useState<Health | null>(null);
   const [latency, setLatency] = useState(0);
-  const [selected, setSelected] = useState<Detail | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [seeded, setSeeded] = useState(0);
+
+  const [hiddenTypes, setHiddenTypes] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [linkDistance, setLinkDistance] = useState(DEFAULT_LINK_DISTANCE);
+  const [charge, setCharge] = useState(DEFAULT_CHARGE);
+
+  const [selected, setSelected] = useState<Selection | null>(null);
+  const [expandedIds, setExpandedIds] = useState<number[]>([]);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [note, setNote] = useState("");
+  // ids whose expansion is done or in flight — clicking the same node twice
+  // must not re-fetch (and must not double-fetch under StrictMode)
+  const requestedRef = useRef<Set<number>>(new Set());
 
   const load = useCallback(async () => {
+    setPhase("loading");
     try {
-      const response = await fetch("/api/graph");
-      const body = await response.json();
+      const response = await fetch(`/api/graph?workspace=${encodeURIComponent(workspace)}`);
+      const body = (await response.json()) as Partial<Panel> & { detail?: string };
       if (!response.ok) throw new Error(body.detail ?? `HTTP ${response.status}`);
       const panel = body as Panel;
       setHealth(panel.health);
-      setLatency(panel.latency_ms);
+      setLatency(panel.latency_ms ?? 0);
+      setSeeded(panel.nodes.length);
+      setSelected(null);
+      setExpandedIds([]);
+      requestedRef.current = new Set();
+      setNote("");
       if (!panel.nodes.length) {
+        setGraph({ nodes: [], edges: [] });
         setPhase("empty");
         return;
       }
-      const result = layout(panel.nodes, panel.edges);
-      setPlaced(result.placed);
-      setLines(result.lines);
+      setGraph({
+        nodes: panel.nodes.map((node) => ({ ...node, origin: "panel" as const })),
+        edges: panel.edges.map((edge) => ({ ...edge, origin: "panel" as const })),
+      });
       setPhase("ready");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setPhase("error");
     }
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function select(id: number) {
-    setSelectedId(id);
-    const response = await fetch(`/api/graph?entity=${id}`);
-    if (response.ok) setSelected((await response.json()) as Detail);
-  }
+  // ── expand: merge the audited 2-hop neighbourhood, never a full reload ─────
+  const expand = useCallback(
+    async (node: Selection, force = false) => {
+      if (!force && requestedRef.current.has(node.id)) return;
+      requestedRef.current.add(node.id);
+      setBusyId(node.id);
+      try {
+        const response = await fetch(
+          `/api/graph?neighbors=${encodeURIComponent(String(node.id))}&hops=2&limit=40` +
+            `&workspace=${encodeURIComponent(workspace)}`,
+        );
+        const body = (await response.json()) as NeighborRow[] | { detail?: string };
+        if (!response.ok || !Array.isArray(body)) {
+          const detail = Array.isArray(body) ? "unexpected response" : body.detail ?? `HTTP ${response.status}`;
+          requestedRef.current.delete(node.id); // a failed expand must stay retryable
+          setNote(`could not expand ${node.label}: ${detail} — next: check the supervisor, then click again`);
+          return;
+        }
+        let addedNodes = 0;
+        let addedEdges = 0;
+        setGraph((previous) => {
+          const ids = new Set(previous.nodes.map((n) => n.id));
+          const keys = new Set(previous.edges.map(edgeKey));
+          const nodes = [...previous.nodes];
+          const edges = [...previous.edges];
+          for (const row of body) {
+            if (!ids.has(row.id)) {
+              ids.add(row.id);
+              nodes.push({
+                id: row.id,
+                label: row.label,
+                type: row.type,
+                score: 0,
+                origin: "expand",
+                hop: row.hop,
+              });
+              addedNodes += 1;
+            }
+            if (row.via == null) continue;
+            // weight stays null: the traversal does not report one, and the
+            // canvas draws "unknown weight" rather than inventing a number
+            const edge: GraphEdge = {
+              source: row.via,
+              target: row.id,
+              predicate: row.predicate,
+              weight: null,
+              confidence: null,
+              doc_id: row.doc_id,
+              extractor: row.extractor,
+              origin: "expand",
+            };
+            const key = edgeKey(edge);
+            if (keys.has(key)) continue;
+            keys.add(key);
+            edges.push(edge);
+            addedEdges += 1;
+          }
+          return { nodes, edges };
+        });
+        setExpandedIds((previous) => (previous.includes(node.id) ? previous : [...previous, node.id]));
+        setNote(
+          addedNodes || addedEdges
+            ? `${node.label}: +${addedNodes} entities · +${addedEdges} links (2 hops, ${body.length} audited paths)`
+            : `${node.label}: 2-hop neighbourhood already on the canvas (${body.length} paths, nothing new)`,
+        );
+      } catch (caught) {
+        const detail = caught instanceof Error ? caught.message : String(caught);
+        requestedRef.current.delete(node.id);
+        setNote(`could not expand ${node.label}: ${detail} — next: check the supervisor, then click again`);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [workspace],
+  );
+
+  const onSelect = useCallback(
+    (node: GraphNode) => {
+      setSelected({ id: node.id, label: node.label });
+      void expand({ id: node.id, label: node.label });
+    },
+    [expand],
+  );
+
+  // walk from a relation row: the related entity joins the canvas carrying the
+  // predicate and the doc it was asserted from
+  const walk = useCallback((relation: Relation, fromId: number) => {
+    const other = relation.entity;
+    setGraph((previous) => {
+      const nodes = previous.nodes.some((n) => n.id === other.id)
+        ? previous.nodes
+        : [...previous.nodes, { id: other.id, label: other.label, type: other.type, score: 0, origin: "expand" as const }];
+      const edge: GraphEdge = {
+        source: relation.direction === "out" ? fromId : other.id,
+        target: relation.direction === "out" ? other.id : fromId,
+        predicate: relation.predicate,
+        weight: relation.weight,
+        confidence: relation.confidence,
+        doc_id: relation.doc_id,
+        extractor: relation.extractor,
+        origin: "expand",
+      };
+      const keys = new Set(previous.edges.map(edgeKey));
+      const edges = keys.has(edgeKey(edge)) ? previous.edges : [...previous.edges, edge];
+      return { nodes, edges };
+    });
+    setSelected({ id: other.id, label: other.label });
+  }, []);
+
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of graph.nodes) {
+      const key = typeLabel(node.type);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [graph.nodes]);
+
+  const expandedCount = graph.nodes.length - seeded;
+
+  // ── the four states ────────────────────────────────────────────────────────
 
   if (phase === "loading") {
-    return <div className="pulse" style={{ marginTop: 28, color: "var(--text-muted)", fontSize: 13.5 }}>growing the map…</div>;
-  }
-  if (phase === "error") {
     return (
-      <div className="plate rise" style={{ marginTop: 24, padding: "18px 22px", borderColor: "rgba(232,161,60,.35)" }}>
-        <div style={{ color: "var(--conf-warn)", fontSize: 13.5, fontWeight: 550 }}>Graph unavailable</div>
-        <div className="receipt" style={{ marginTop: 6 }}>{error}</div>
+      <div className="plate rise" style={{ marginTop: 20, padding: 18 }}>
+        <div className="pulse" style={{ color: "var(--text-muted)", fontSize: 13.5 }}>growing the map…</div>
+        <div className="pulse" style={{ marginTop: 12, height: 320, borderRadius: 12, background: "rgba(79,216,196,.045)" }} />
       </div>
     );
   }
+
+  if (phase === "error") {
+    return (
+      <div className="plate rise" style={{ marginTop: 20, padding: "18px 22px", borderColor: "rgba(232,161,60,.35)" }}>
+        <div style={{ color: "var(--conf-warn)", fontSize: 13.5, fontWeight: 550 }}>Graph unavailable</div>
+        <div className="receipt" style={{ marginTop: 6 }}>{error}</div>
+        <div className="receipt" style={{ color: "var(--text-muted)" }}>
+          next: start the supervisor — <code>api/.venv/bin/python api/heydey_supervisor.py</code> — then retry
+        </div>
+        <button type="button" style={{ ...ACTION, marginTop: 12 }} onClick={() => void load()}>retry</button>
+      </div>
+    );
+  }
+
   if (phase === "empty") {
     return (
-      <div className="plate rise" style={{ marginTop: 24, padding: "20px 24px" }}>
-        <div style={{ fontSize: 14.5, fontWeight: 600 }}>No activity yet</div>
-        <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
-          The graph grows as a byproduct of use — ask a few questions and the entities of
-          co-retrieved documents will link themselves. No cron job will ever build this.
+      <div className="plate rise" style={{ marginTop: 20, padding: "20px 24px" }}>
+        <div style={{ fontSize: 14.5, fontWeight: 600 }}>No graph yet</div>
+        <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13, maxWidth: 620 }}>
+          The graph grows out of documents you ingest and questions you ask — never a scheduled
+          crawl. Nothing has been indexed for <span style={{ fontFamily: "var(--mono)" }}>{workspace}</span> yet.
         </div>
+        <div className="receipt" style={{ marginTop: 12, color: "var(--conf-validated)" }}>run an ingest</div>
+        <div className="receipt">api/.venv/bin/python -m heydey.ops_ingest --workspace {workspace}</div>
+        <div className="receipt">
+          api/.venv/bin/python -m heydey.graph_backfill --workspace {workspace} --pass deterministic
+        </div>
+        <button type="button" style={{ ...ACTION, marginTop: 12 }} onClick={() => void load()}>check again</button>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="receipt" style={{ marginTop: 14 }}>
+      <div className="receipt" style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         {health && (
-          <>top 50 of {health.entities.toLocaleString()} entities · {health.edges.toLocaleString()} live edges ·
-            last grew {health.last_grown ?? "never"} · panel {Math.round(latency)}ms</>
+          <span>
+            top {seeded} of {health.entities.toLocaleString()} entities · {health.edges.toLocaleString()} live edges ·
+            {" "}last grew {health.last_grown?.slice(0, 16).replace("T", " ") ?? "never"} · panel {Math.round(latency)}ms
+            {expandedCount > 0 ? ` · +${expandedCount} expanded` : ""}
+          </span>
+        )}
+        {health?.stalled_24h && (
+          <span style={{ color: "var(--conf-warn)" }}>· no growth in 24h — next: ingest or ask something</span>
+        )}
+        <button
+          type="button"
+          onClick={() => void load()}
+          style={{ ...ACTION, padding: "4px 9px", fontSize: 11 }}
+          title="reload the ranked panel (clears expansions)"
+        >
+          reload
+        </button>
+      </div>
+
+      <div className="plate" style={{ marginTop: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="search entities — centres the first match, dims the rest"
+            aria-label="search entities"
+            style={{ ...CONTROL, flex: "1 1 300px", minWidth: 220 }}
+          />
+          {search && (
+            <button type="button" style={{ ...ACTION, padding: "6px 10px" }} onClick={() => setSearch("")}>clear</button>
+          )}
+          <label className="receipt" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            link distance
+            <input
+              type="range"
+              min={40}
+              max={280}
+              step={4}
+              value={linkDistance}
+              onChange={(event) => setLinkDistance(Number(event.target.value))}
+              aria-label="link distance"
+              style={{ width: 110 }}
+            />
+            <span style={{ color: "var(--text-faint)", width: 26 }}>{linkDistance}</span>
+          </label>
+          <label className="receipt" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            repulsion
+            <input
+              type="range"
+              min={-900}
+              max={-40}
+              step={10}
+              value={charge}
+              onChange={(event) => setCharge(Number(event.target.value))}
+              aria-label="repulsion"
+              style={{ width: 110 }}
+            />
+            <span style={{ color: "var(--text-faint)", width: 34 }}>{charge}</span>
+          </label>
+          <button
+            type="button"
+            style={{ ...ACTION, padding: "6px 10px" }}
+            onClick={() => {
+              setLinkDistance(DEFAULT_LINK_DISTANCE);
+              setCharge(DEFAULT_CHARGE);
+            }}
+          >
+            reset layout
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="receipt" style={{ color: "var(--text-faint)" }}>types:</span>
+          {typeCounts.map(([type, count]) => {
+            const off = hiddenTypes.includes(type);
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() =>
+                  setHiddenTypes((previous) =>
+                    previous.includes(type) ? previous.filter((t) => t !== type) : [...previous, type],
+                  )
+                }
+                title={off ? `show ${type}` : `hide ${type}`}
+                style={{
+                  alignItems: "center",
+                  background: off ? "transparent" : "rgba(255,255,255,.035)",
+                  border: `1px solid ${off ? "var(--plate-border)" : colorFor(type === "untyped" ? null : type)}`,
+                  borderRadius: 999,
+                  color: off ? "var(--text-faint)" : "var(--text)",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  fontFamily: "var(--mono)",
+                  fontSize: 11,
+                  gap: 6,
+                  opacity: off ? 0.55 : 1,
+                  padding: "4px 10px",
+                }}
+              >
+                <span
+                  style={{
+                    background: colorFor(type === "untyped" ? null : type),
+                    borderRadius: 999,
+                    height: 7,
+                    opacity: off ? 0.35 : 1,
+                    width: 7,
+                  }}
+                />
+                {type} {count}
+              </button>
+            );
+          })}
+          {hiddenTypes.length > 0 && (
+            <button type="button" style={{ ...ACTION, padding: "4px 9px", fontSize: 11 }} onClick={() => setHiddenTypes([])}>
+              show all
+            </button>
+          )}
+        </div>
+      </div>
+
+      {note && (
+        <div className="receipt" style={{ marginTop: 8, color: note.startsWith("could not") ? "var(--conf-warn)" : "var(--conf-validated)" }}>
+          {note}
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: selected ? "minmax(0, 1fr) minmax(300px, 360px)" : "minmax(0, 1fr)",
+          marginTop: 10,
+        }}
+      >
+        <div className="plate rise" style={{ padding: 6, overflow: "hidden" }}>
+          <GraphCanvas
+            nodes={graph.nodes}
+            edges={graph.edges}
+            hiddenTypes={hiddenTypes}
+            search={search}
+            selectedId={selected?.id ?? null}
+            expandedIds={expandedIds}
+            busyId={busyId}
+            linkDistance={linkDistance}
+            charge={charge}
+            onSelect={onSelect}
+          />
+        </div>
+
+        {selected && (
+          <EntityProfile
+            key={selected.id}
+            entityId={selected.id}
+            label={selected.label}
+            workspace={workspace}
+            onClose={() => setSelected(null)}
+            onExpand={() => void expand(selected, true)}
+            onWalk={(relation) => walk(relation, selected.id)}
+          />
         )}
       </div>
 
-      <div className="plate rise" style={{ marginTop: 12, padding: 8, overflow: "hidden" }}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-          {lines.map((line, i) => (
-            <line
-              key={i}
-              x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-              stroke="rgba(79, 216, 196, 0.14)"
-              strokeWidth={Math.min(0.5 + line.weight * 0.35, 3)}
-            />
-          ))}
-          {placed.map((node) => {
-            const color = TYPE_COLOR[node.type ?? ""] ?? "var(--text-muted)";
-            const active = node.id === selectedId;
-            return (
-              <g key={node.id} onClick={() => void select(node.id)} style={{ cursor: "pointer" }}>
-                <circle cx={node.x} cy={node.y} r={node.r}
-                        fill="rgba(13, 20, 38, 0.9)" stroke={color}
-                        strokeWidth={active ? 2 : 1.1} />
-                {node.r >= 9 && (
-                  <text x={node.x} y={node.y + node.r + 11} textAnchor="middle"
-                        fill={active ? "var(--text)" : "var(--text-muted)"}
-                        style={{ fontSize: 10, fontFamily: "var(--mono)" }}>
-                    {node.label.length > 18 ? `${node.label.slice(0, 17)}…` : node.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
+      <div className="receipt" style={{ marginTop: 8, color: "var(--text-faint)" }}>
+        node colour = entity type · node size = activity score · line thickness = co-retrieval weight ·
+        dashed = added by a 2-hop expansion (no weight reported) · hover a line for its predicate and source doc
       </div>
-
-      {selected && (
-        <div className="plate rise" style={{ marginTop: 12, padding: "18px 22px" }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 15, fontWeight: 650, letterSpacing: "-0.013em" }}>{selected.label}</span>
-            <span className="receipt">{selected.type ?? "entity"} · confidence {selected.confidence}</span>
-          </div>
-          <div className="receipt" style={{ marginTop: 4, color: "var(--text-faint)" }}>
-            from {selected.source_doc_id.split("/").pop()}
-          </div>
-
-          {selected.receipts.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <div className="receipt" style={{ color: "var(--conf-validated)" }}>receipts</div>
-              {selected.receipts.map((receipt, i) => (
-                <div key={i} className="receipt reveal" style={{ "--i": i } as React.CSSProperties}>
-                  {receipt.claim_text.slice(0, 110)} · [{receipt.run_id.slice(0, 12)}
-                  {receipt.retrieval_score != null ? ` · ${receipt.retrieval_score.toFixed(2)}` : ""}]
-                </div>
-              ))}
-            </div>
-          )}
-
-          {selected.sessions.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div className="receipt" style={{ color: "var(--conf-validated)" }}>sessions that touched this</div>
-              {selected.sessions.map((session) => (
-                <div key={session.id} className="receipt">
-                  {session.started_at?.slice(0, 16)} · {session.intent?.slice(0, 80)}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {selected.receipts.length === 0 && selected.sessions.length === 0 && (
-            <div className="receipt" style={{ marginTop: 10, color: "var(--text-faint)" }}>
-              seen in retrieval ({selected.runs.length} run(s)) — no answer has cited it yet
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

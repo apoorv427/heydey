@@ -94,6 +94,20 @@ def test_no_secret_in_response(client, canary_secret, monkeypatch):
         client.post("/ask",
                     json={"question": "q", "workspace": "sec-ws", "agent": "nope"},
                     headers=auth_headers()),  # 404 unknown-agent path
+        # W2 OAuth connect surface — the client_secret the user just typed is the
+        # canary here: it must never come back on ANY of these five legs
+        client.post("/connectors/oauth/config",
+                    json={"connector_id": "google-workspace", "client_id": "cid-sweep",
+                          "client_secret": typed_key},
+                    headers=auth_headers()),
+        client.get("/connectors/oauth/status?connector_id=google-workspace&workspace=sec-ws"),
+        client.post("/connectors/oauth/start",
+                    json={"connector_id": "google-workspace", "workspace": "sec-ws"},
+                    headers=auth_headers()),  # 422 unconfigured path (no keychain in tests)
+        client.get("/connectors/oauth/callback?code=abc&state=not-a-pending-flow"),  # 400 html
+        client.post("/connectors/oauth/disconnect",
+                    json={"connector_id": "google-workspace", "workspace": "sec-ws"},
+                    headers=auth_headers()),
     ]
     for response in responses:
         assert CANARY not in response.text, response.request.url
@@ -110,6 +124,9 @@ def test_no_secret_in_response(client, canary_secret, monkeypatch):
                          "/artifacts",
                          "/sessions", "/sessions/detail", "/sessions/delete",
                          "/connectors", "/connectors/register", "/connectors/sync",
+                         "/connectors/oauth/config", "/connectors/oauth/status",
+                         "/connectors/oauth/start", "/connectors/oauth/callback",
+                         "/connectors/oauth/disconnect",
                          "/foundry/onboard", "/foundry/status"}
 
     # ...and the workspace db created while a secret was in memory contains no key material

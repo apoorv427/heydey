@@ -44,6 +44,11 @@ from . import graph_resolve
 # path (a future LLM pass, the entity API) must go through the same front door.
 from .graph_resolve import ENTITY_TYPES, canonical_key, resolve_entity  # noqa: F401
 
+# graph_aliases rows in this reserved key-space record a TYPE that was asserted,
+# not a spelling. They are evidence (see graph_resolve), so they are stored — and
+# filtered out of every alias list a surface renders.
+_TYPE_EVIDENCE_LIKE = graph_resolve.TYPE_EVIDENCE_PREFIX + "%"
+
 # Typed, directional relations (fixed vocabulary — shared contract).
 PREDICATES = frozenset({
     "MENTIONS", "AUTHORED_BY", "DECIDED_BY", "BLOCKS", "DEPENDS_ON", "OWNS",
@@ -748,7 +753,8 @@ def entity_detail(conn: sqlite3.Connection, entity_id: int) -> dict | None:
         " WHERE (src_id=? OR dst_id=?) AND extractor='co_activity' AND doc_id LIKE 'run:%'"
         " ORDER BY asserted_at DESC LIMIT 10", (entity_id, entity_id)).fetchall()]
     aliases = [r[0] for r in conn.execute(
-        "SELECT alias FROM graph_aliases WHERE entity_id=? ORDER BY created_at", (entity_id,))]
+        "SELECT alias FROM graph_aliases WHERE entity_id=? AND alias_key NOT LIKE ?"
+        " ORDER BY created_at", (entity_id, _TYPE_EVIDENCE_LIKE))]
     return {"id": row[0], "canonical_key": row[1], "label": row[2], "type": row[3],
             "confidence": row[4], "mentions": row[5], "first_seen": row[6],
             "last_seen": row[7], "source_doc_id": source_doc_id, "aliases": aliases,
@@ -803,7 +809,14 @@ def entity_profile(conn: sqlite3.Connection, key_or_id, workspace_id: str = "") 
     entity_id = row[0]
     aliases = [dict(r) for r in conn.execute(
         "SELECT alias, alias_key, source_doc_id, created_at FROM graph_aliases"
-        " WHERE entity_id=? ORDER BY created_at", (entity_id,)).fetchall()]
+        " WHERE entity_id=? AND alias_key NOT LIKE ? ORDER BY created_at",
+        (entity_id, _TYPE_EVIDENCE_LIKE)).fetchall()]
+    # Every type ever asserted for this entity, including the ones type
+    # precedence overruled. Recorded, filtered out of `aliases` (a type is not a
+    # spelling), and surfaced here so a merge is auditable rather than silent.
+    types_seen = [r[0] for r in conn.execute(
+        "SELECT alias FROM graph_aliases WHERE entity_id=? AND alias_key LIKE ?"
+        " ORDER BY alias", (entity_id, _TYPE_EVIDENCE_LIKE)).fetchall()]
     mention_docs = [dict(r) for r in conn.execute(
         "SELECT doc_id, chunk_id, confidence, created_at FROM graph_mentions"
         " WHERE entity_id=? ORDER BY created_at", (entity_id,)).fetchall()]
@@ -813,6 +826,7 @@ def entity_profile(conn: sqlite3.Connection, key_or_id, workspace_id: str = "") 
                    "type": row[3], "workspace_id": row[4], "confidence": row[5],
                    "mention_count": row[6], "first_seen": row[7], "last_seen": row[8]},
         "aliases": aliases,
+        "types_seen": types_seen,
         "mention_docs": mention_docs,
         "related": _related(conn, entity_id),
         "receipts": _receipts_for(conn, home, limit=10),

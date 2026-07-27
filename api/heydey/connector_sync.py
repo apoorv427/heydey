@@ -54,6 +54,12 @@ KNOWN_SERVERS: dict[str, list[str]] = {
 _SYNTHETIC_CONNECTORS = frozenset(KNOWN_SERVERS)
 
 
+# Where a refused SYNTHETIC sync is REROUTED instead of failing (CEO decision,
+# 2026-07-27): the demo rows still land somewhere the user can open, and the
+# protected corpus stays pure. Created on demand by the /connectors/sync route.
+DEMO_WORKSPACE = "demo"
+
+
 def _protected_workspaces() -> frozenset[str]:
     """Workspaces a synthetic connector may NOT sync into (the production
     corpora). Defaults to the server's default workspace; override with the
@@ -75,6 +81,23 @@ def _assert_sync_allowed(workspace_id: str, connector_id: str) -> None:
             f"refusing to sync synthetic connector {connector_id!r} into protected "
             f"workspace {workspace_id!r} — demo data must never enter a real corpus "
             f"(override with HEYDEY_PROTECTED_WORKSPACES)")
+
+
+def sync_blocked_reason(workspace_id: str, connector_id: str) -> str | None:
+    """The guard's message when this (workspace, connector) pair is refused,
+    else ``None``.
+
+    Same decision as :func:`_assert_sync_allowed`, in a form a SURFACE can
+    branch on. A UI must reroute rather than explode, and asking beforehand is
+    honest where catching-to-continue would blur the rule: the guard itself
+    stays absolute and ``sync`` re-asserts it on the target it is actually
+    handed, so no caller can talk its way past it.
+    """
+    try:
+        _assert_sync_allowed(workspace_id, connector_id)
+    except connectors.ConnectorError as exc:
+        return str(exc)
+    return None
 
 
 def _now() -> str:

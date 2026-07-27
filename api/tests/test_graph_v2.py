@@ -63,10 +63,8 @@ def test_fuzzy_merge_inside_type_only(conn):
     typo = graph_resolve.resolve_entity(conn, "Ravensbourn", "org", "gws2",
                                         confidence=0.9, doc_id="d2")
     assert typo == near, "difflib ratio >= 0.92 inside one type merges"
-
-    other_type = graph_resolve.resolve_entity(conn, "Ravensbourne", "product", "gws2",
-                                              confidence=0.9, doc_id="d3")
-    assert other_type != near, "identity never merges across types"
+    # (a same-key DIFFERENT type no longer mints a sibling — that is the G1b
+    #  reconciliation, proved in section 8 below.)
 
     # short keys are never fuzzy-merged (L23 must not swallow L28)
     lock_a = graph_resolve.resolve_entity(conn, "L23", "lock", "gws2",
@@ -371,6 +369,273 @@ def test_panel_ranks_actors_above_scaffolding(conn):
     ranked = {n["label"]: n["score"] for n in graph.top_entities(conn, limit=10)}
     assert ranked["Ravensbourne"] > ranked["2026-05-13"]
     assert "2026-05-13" in ranked, "scaffolding is demoted, never hidden"
+
+
+# ── 8. type reconciliation: one label, two types, ONE entity ─────────────────
+#
+# Measured on the live workspace 2026-07-27: 386 canonical keys split across
+# types after only 206 of 1,271 docs of the semantic pass ("claude code" as org
+# AND product AND technology). Same duplicate-identity class as the 26-nodes
+# bug — the deterministic pass types a label one way, the model pass another.
+
+def _rows_for(conn, key):
+    return conn.execute(
+        "SELECT id, type, mention_count FROM graph_entities WHERE canonical_key=?"
+        " ORDER BY id", (key,)).fetchall()
+
+
+def test_same_label_two_types_resolves_to_one_entity(conn):
+    """v1 of the rebuild keyed on (canonical_key, type): this made TWO nodes."""
+    as_org = graph_resolve.resolve_entity(conn, "Claude Code", "org", "gws2",
+                                          confidence=0.85, doc_id="d1")
+    as_product = graph_resolve.resolve_entity(conn, "Claude Code", "product", "gws2",
+                                              confidence=0.8, doc_id="d1")
+    as_tech = graph_resolve.resolve_entity(conn, "Claude Code", "technology", "gws2",
+                                           confidence=0.6, doc_id="d2")
+
+    assert as_org == as_product == as_tech, "one real-world thing, one node"
+    assert len(_rows_for(conn, "claude code")) == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM (" + graph_resolve.SPLIT_KEYS_SQL + ")").fetchone()[0] == 0
+
+
+def test_precedence_picks_the_documented_winner(conn):
+    # 1. NAMED beats the untyped `org` bucket even on far fewer mentions.
+    graph_resolve.resolve_entity(conn, "Kritagya", "org", "gws2",
+                                 confidence=0.75, doc_id="d1")
+    graph_resolve.resolve_entity(conn, "Kritagya", "org", "gws2",
+                                 confidence=0.75, doc_id="d2")
+    graph_resolve.resolve_entity(conn, "Kritagya", "person", "gws2",
+                                 confidence=0.6, doc_id="d3")
+    assert _rows_for(conn, "kritagya")[0][1] == "person"
+
+    # 2. A SHAPE type asserted WITHOUT its regex (conf < 0.9) is the weakest
+    #    evidence there is — "quercetin" is not a marker because a model said so.
+    graph_resolve.resolve_entity(conn, "Quercetin", "org", "gws2",
+                                 confidence=0.75, doc_id="d1")
+    graph_resolve.resolve_entity(conn, "Quercetin", "marker", "gws2",
+                                 confidence=0.6, doc_id="d1")
+    assert _rows_for(conn, "quercetin")[0][1] == "org"
+
+    # 3. …but the SAME type PROVEN by the regex (conf >= 0.9) outranks everything.
+    graph_resolve.resolve_entity(conn, "PENDING", "org", "gws2",
+                                 confidence=0.85, doc_id="d1")
+    graph_resolve.resolve_entity(conn, "PENDING", "marker", "gws2",
+                                 confidence=0.9, doc_id="d1")
+    assert _rows_for(conn, "pending")[0][1] == "marker"
+
+    # 4. Deterministic/gazetteer evidence outranks a single model assertion
+    #    inside the same tier: gazetteer product (0.95) vs an asserted person.
+    graph_resolve.resolve_entity(conn, "Ravensbourne", "product", "gws2",
+                                 confidence=0.95, doc_id="d1")
+    graph_resolve.resolve_entity(conn, "Ravensbourne", "person", "gws2",
+                                 confidence=0.6, doc_id="d1")
+    assert _rows_for(conn, "ravensbourne")[0][1] == "product"
+
+    # 5. PROPOSITIONAL loses to a name: "governance" is a thing, not a decision.
+    graph_resolve.resolve_entity(conn, "Governance", "org", "gws2",
+                                 confidence=0.75, doc_id="d1")
+    graph_resolve.resolve_entity(conn, "Governance", "decision", "gws2",
+                                 confidence=0.6, doc_id="d1")
+    assert _rows_for(conn, "governance")[0][1] == "org"
+
+
+def test_rejected_type_is_kept_as_evidence_not_discarded(conn):
+    eid = graph_resolve.resolve_entity(conn, "Kritagya", "org", "gws2",
+                                       confidence=0.75, doc_id="d1")
+    graph_resolve.resolve_entity(conn, "Kritagya", "person", "gws2",
+                                 confidence=0.6, doc_id="d1")
+
+    profile = graph.entity_profile(conn, "kritagya", workspace_id="gws2")
+    assert profile["entity"]["id"] == eid and profile["entity"]["type"] == "person"
+    assert sorted(profile["types_seen"]) == ["org", "person"], "the overruled type survives"
+    # …and a type is not a spelling: it never pollutes the alias list the UI renders
+    assert [a["alias"] for a in profile["aliases"]] == ["Kritagya"]
+
+
+def test_a_fresh_assertion_never_splits_even_against_a_well_attested_row(conn):
+    """The guard is a REPAIR-time rule, and this test pins why. An incoming
+    assertion has no independent body of evidence to weigh against the stored
+    row, so reconciliation always wins and the split never forms. Blocking here
+    instead would resurrect the defect: on the live corpus 'kritagya' (org, 39
+    mentions) is asserted `person` from documents the org row never saw."""
+    for i in range(5):
+        graph_resolve.resolve_entity(conn, "Kritagya", "org", "gws2",
+                                     confidence=0.75, doc_id=f"org-{i}")
+    graph_resolve.resolve_entity(conn, "Kritagya", "person", "gws2",
+                                 confidence=0.6, doc_id="elsewhere")
+
+    rows = _rows_for(conn, "kritagya")
+    assert len(rows) == 1 and rows[0][1] == "person"
+    assert rows[0][2] == 6, "every sighting, both types, on the one node"
+
+
+# ── 8b. the merge path for splits that already exist ─────────────────────────
+
+def _force_split(conn, label, type_a, type_b, *, conf_a=0.75, conf_b=0.6,
+                 docs_a=("d1",), docs_b=("d2",)):
+    """Write a pre-existing split the way the two passes did, bypassing the new
+    reconciliation — this is the shape of the 792 live rows."""
+    key = graph_resolve.canonical_key(label)
+    ids = []
+    for etype, conf, docs in ((type_a, conf_a, docs_a), (type_b, conf_b, docs_b)):
+        stamp = f"2026-07-2{len(ids)}T00:00:00"
+        cur = conn.execute(
+            "INSERT INTO graph_entities(canonical_key, label, type, workspace_id,"
+            " confidence, mention_count, first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?)",
+            (key, label, etype, "gws2", conf, len(docs), stamp, stamp))
+        eid = int(cur.lastrowid)
+        for doc in docs:
+            conn.execute(
+                "INSERT INTO graph_mentions(entity_id, doc_id, chunk_id, confidence,"
+                " created_at) VALUES (?,?,'',?,'2026-07-27T00:00:00')", (eid, doc, conf))
+        conn.execute(
+            "INSERT INTO graph_aliases(entity_id, alias, alias_key, source_doc_id, created_at)"
+            " VALUES (?,?,?,?,'2026-07-27T00:00:00')",
+            (eid, f"{label}-{etype}", f"{graph_resolve.alias_key(label)} {etype}", docs[0]))
+        ids.append(eid)
+    return ids
+
+
+def test_merge_refuses_two_independently_attested_named_things(conn):
+    """A person and an unrelated company that share a string: both well
+    attested, never in the same document -> left split, and REPORTED."""
+    n = graph_resolve.CORROBORATION_MIN
+    _force_split(conn, "Ford", "org", "person",
+                 docs_a=tuple(f"org-{i}" for i in range(n)),
+                 docs_b=tuple(f"person-{i}" for i in range(n)))
+    # …and a split of the same shape that DOES share a document must still fold
+    _force_split(conn, "Wexford", "org", "person",
+                 docs_a=tuple(f"w-{i}" for i in range(n)),
+                 docs_b=("w-0", *(f"wx-{i}" for i in range(n - 1))))
+    conn.commit()
+
+    report = graph_resolve.merge_type_splits(conn)
+    assert report["merged"] == 1, "the shared-document split folds"
+    assert [b["canonical_key"] for b in report["blocked"]] == ["ford"]
+    assert report["after"]["split_type_keys"] == 1  # honest residual, not hidden
+    assert len(_rows_for(conn, "ford")) == 2
+    assert len(_rows_for(conn, "wexford")) == 1
+
+    # rerunning does not wear the guard down
+    assert graph_resolve.merge_type_splits(conn)["merged"] == 0
+    assert len(_rows_for(conn, "ford")) == 2
+
+
+def test_merge_folds_pre_existing_splits_without_orphaning_anything(conn):
+    graph.index_document(conn, "anchor", "ORION and VEGA ship together.", "gws2")
+    other = graph_resolve.resolve_entity(conn, "Wexford Partners", "org", "gws2",
+                                         confidence=0.85, doc_id="d9")
+    org_id, product_id = _force_split(conn, "Blueleaf", "org", "product",
+                                      conf_a=0.75, conf_b=0.8)
+    # edges on BOTH halves, plus the org<->product edge that must not survive
+    # as a self-loop, plus one duplicate pair that must collapse, not double.
+    graph.add_edge(conn, org_id, other, "CLIENT_OF", doc_id="d1", extractor="regex")
+    graph.add_edge(conn, product_id, other, "CLIENT_OF", doc_id="d1", extractor="regex")
+    graph.add_edge(conn, other, product_id, "OWNS", doc_id="d2", extractor="regex")
+    lo, hi = sorted((org_id, product_id))
+    graph.add_edge(conn, lo, hi, "CO_ACTIVITY", doc_id="d1", extractor="pmi")
+    conn.commit()
+
+    before = graph_resolve.integrity_report(conn)
+    assert before["split_type_keys"] == 1
+
+    report = graph_resolve.merge_type_splits(conn)
+    after = report["after"]
+
+    assert report["merged"] == 1 and report["blocked"] == []
+    assert after["split_type_keys"] == 0
+    assert after["entities"] == before["entities"] - 1
+    for field in ("dangling_edge_src", "dangling_edge_dst", "dangling_mentions",
+                  "dangling_aliases", "self_loop_edges"):
+        assert after[field] == 0, f"{field} must be 0 after a merge"
+
+    rows = _rows_for(conn, "blueleaf")
+    assert len(rows) == 1
+    survivor, surviving_type, mentions = rows[0]
+    assert surviving_type == "product", "precedence: NAMED beats the org bucket"
+    assert survivor == product_id, "the precedence winner is the row that survives"
+    assert not conn.execute("SELECT 1 FROM graph_entities WHERE id=?", (org_id,)).fetchone()
+    assert mentions == 2, "both halves' mentions are absorbed"
+    assert conn.execute("SELECT first_seen FROM graph_entities WHERE id=?",
+                        (survivor,)).fetchone()[0] == "2026-07-20T00:00:00"
+
+    # both halves' relations now hang off the one node, de-duplicated
+    related = {(r["predicate"], r["doc_id"]) for r in graph.entity_profile(
+        conn, survivor)["related"]}
+    assert ("CLIENT_OF", "d1") in related and ("OWNS", "d2") in related
+    assert conn.execute(
+        "SELECT COUNT(*) FROM graph_edges WHERE predicate='CLIENT_OF' AND doc_id='d1'"
+    ).fetchone()[0] == 1
+    # every alias of both halves survived on the winner
+    assert conn.execute(
+        "SELECT COUNT(*) FROM graph_aliases WHERE entity_id=? AND alias_key NOT LIKE 'type::%'",
+        (survivor,)).fetchone()[0] == 2
+    # …and the losing type is on the record
+    assert sorted(graph.entity_profile(conn, survivor)["types_seen"]) == ["org", "product"]
+
+
+def test_merge_is_idempotent(conn):
+    _force_split(conn, "Blueleaf HQ", "org", "place")
+    _force_split(conn, "Qdrant", "product", "technology", conf_a=0.95, conf_b=0.6)
+    conn.commit()
+
+    first = graph_resolve.merge_type_splits(conn)
+    assert first["merged"] == 2 and first["after"]["split_type_keys"] == 0
+    snapshot = graph_resolve.integrity_report(conn)
+    fingerprint = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(id),0), COALESCE(SUM(mention_count),0)"
+        " FROM graph_entities").fetchone()
+
+    second = graph_resolve.merge_type_splits(conn)
+    assert second["merged"] == 0, "running twice must change nothing"
+    assert second["groups"] == 0 and second["blocked"] == []
+    assert graph_resolve.integrity_report(conn) == snapshot
+    assert conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(id),0), COALESCE(SUM(mention_count),0)"
+        " FROM graph_entities").fetchone() == fingerprint
+    assert _rows_for(conn, "qdrant")[0][1] == "product"   # gazetteer 0.95 wins
+
+
+def test_merge_dry_run_measures_without_writing(conn):
+    _force_split(conn, "Blueleaf HQ", "org", "place")
+    conn.commit()
+    before = graph_resolve.integrity_report(conn)
+
+    report = graph_resolve.merge_type_splits(conn, dry_run=True)
+    assert report["merged"] == 1 and report["dry_run"] is True
+    assert graph_resolve.integrity_report(conn) == before, "a dry run writes nothing"
+
+
+def test_merge_cli_runs_against_a_workspace(conn, capsys):
+    import json
+
+    _force_split(conn, "Blueleaf HQ", "org", "place")
+    conn.commit()
+    conn.close()
+
+    assert graph_resolve.main(["--merge-types", "--workspace", "gws2"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["merged"] == 1
+    assert report["after"]["split_type_keys"] == 0
+    assert report["after"]["dangling_edge_src"] == 0
+
+
+def test_ingest_never_reintroduces_a_type_split(conn):
+    """The end-to-end shape of the live regression: the deterministic pass runs,
+    then the model pass asserts a different type for the same string."""
+    graph.index_document(conn, "s1", "# Ravensbourne\n\nRavensbourne shipped ORION.", "gws2")
+    graph_resolve.resolve_entity(conn, "Ravensbourne", "technology", "gws2",
+                                 confidence=0.8, doc_id="s1", chunk_id="s1#0")
+    graph_resolve.resolve_entity(conn, "ORION", "product", "gws2",
+                                 confidence=0.6, doc_id="s1", chunk_id="s1#0")
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM (" + graph_resolve.SPLIT_KEYS_SQL + ")").fetchone()[0] == 0
+    report = graph_resolve.integrity_report(conn)
+    for field in ("dangling_edge_src", "dangling_edge_dst", "dangling_mentions",
+                  "dangling_aliases", "self_loop_edges"):
+        assert report[field] == 0
 
 
 def test_canonical_key_normalisation():
