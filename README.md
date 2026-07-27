@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/apoorv427/heydey/actions/workflows/tests.yml"><img src="https://github.com/apoorv427/heydey/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-351%2F351-4FD8C4?labelColor=0D1426" alt="tests 351/351">
+  <img src="https://img.shields.io/badge/tests-352%2F352-4FD8C4?labelColor=0D1426" alt="tests 352/352">
   <img src="https://img.shields.io/badge/gates-11%2F11%20green-4FD8C4?labelColor=0D1426" alt="gates 11/11 green">
   <img src="https://img.shields.io/badge/local--first-%240%20mode-6FCFA9?labelColor=0D1426" alt="local-first, $0 mode">
   <img src="https://img.shields.io/badge/agent%20frameworks-0-8A94A8?labelColor=0D1426" alt="zero agent frameworks">
@@ -144,7 +144,7 @@ falsifiable gate — a command, a test, or a stopwatch — not a claim.
 
 | Proof | State |
 |---|---|
-| Test suite | **351 / 351 passing** |
+| Test suite | **352 / 352 passing** |
 | Gate runners (retrieval · validator · isolation · auth · secrets · egress · connectors · foundry) | **11 / 11 green** |
 | Retrieval gate (S2) | two documented hard-query failures now return the correct chunk **top-3** with a working breadcrumb |
 | Cross-model validator (S3) | adversarial 50-prompt eval re-run 2026-07-27: **0 ungrounded · 0 fabrications** (every answer cleared the deterministic verbatim audit); a cross-family judge (deepseek) is the default second layer when determinism can't decide |
