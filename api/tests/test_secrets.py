@@ -61,6 +61,14 @@ def test_no_secret_in_response(client, canary_secret, monkeypatch):
                     headers=auth_headers()),  # 404 path
         client.get("/graph?workspace=sec-ws"),
         client.get("/graph/entity?id=1&workspace=sec-ws"),  # 404 path
+        # graph rebuild surface (G1): profile is the primary product view, neighbors
+        # the 2-hop traversal — both must stay canary-free on hit AND miss paths
+        client.get("/graph/profile?key=nope&workspace=sec-ws"),  # 404 path
+        client.get("/graph/neighbors?id=1&workspace=sec-ws"),
+        # artifacts surface: provenance rows join approvals+receipts, so a secret
+        # that ever reached a payload would surface here first
+        client.get("/artifacts?workspace=sec-ws"),
+        client.get("/artifacts?workspace=sec-ws&include_os=true"),
         client.get("/today?workspace=sec-ws"),
         client.post("/brief/run", json={"workspace": "sec-ws", "notify": False},
                     headers=auth_headers()),
@@ -98,7 +106,8 @@ def test_no_secret_in_response(client, canary_secret, monkeypatch):
     api_paths = {route.path for route in client.app.routes if isinstance(route, APIRoute)}
     assert api_paths == {"/health", "/workspaces", "/ask", "/find", "/models", "/costs",
                          "/reveal", "/today", "/brief/run", "/approvals/decide",
-                         "/graph", "/graph/entity",
+                         "/graph", "/graph/entity", "/graph/profile", "/graph/neighbors",
+                         "/artifacts",
                          "/sessions", "/sessions/detail", "/sessions/delete",
                          "/connectors", "/connectors/register", "/connectors/sync",
                          "/foundry/onboard", "/foundry/status"}

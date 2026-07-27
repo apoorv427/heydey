@@ -12,3 +12,8 @@ node_modules/
 .DS_Store
 _System/pii-audit.jsonl
 *.egg-info/
+
+# python test/build cruft (never publish — it caches test ids containing corpus terms)
+.pytest_cache/
+__pycache__/
+*.pyc

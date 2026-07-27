@@ -27,7 +27,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import __version__, approvals, ask, config, connector_sync, connectors, episodic, foundry
+from . import __version__, approvals, artifacts, ask, config, connector_sync, connectors, episodic, foundry
 from . import graph, models_config, models_state, morning_brief, ops_ingest, pipeline
 from . import secrets_store, sentinel, workspaces
 from .auth import request_is_authorized
@@ -416,6 +416,64 @@ def create_app(token: str) -> FastAPI:
             if detail is None:
                 return JSONResponse({"detail": f"entity {id} not found"}, status_code=404)
             return detail
+        finally:
+            conn.close()
+
+    @app.get("/graph/profile")
+    def graph_profile(key: str, workspace: str = "blueleaf"):
+        """Entity profile — 'everything about X': aliases, the docs that
+        mention it, typed relations, receipts. The graph rebuild's primary
+        product surface (the force-directed canvas is the secondary lens)."""
+        try:
+            conn = workspaces.connect(workspace)
+        except workspaces.WorkspaceError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=404)
+        try:
+            profile = graph.entity_profile(conn, key, workspace_id=workspace)
+            if profile is None:
+                return JSONResponse(
+                    {"detail": f"no entity matching {key!r}",
+                     "next_step": "run the graph backfill, or try the canonical label"},
+                    status_code=404)
+            return profile
+        finally:
+            conn.close()
+
+    @app.get("/graph/neighbors")
+    def graph_neighbors(id: int, workspace: str = "blueleaf", hops: int = 2, limit: int = 50):
+        try:
+            conn = workspaces.connect(workspace)
+        except workspaces.WorkspaceError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=404)
+        try:
+            t0 = time.perf_counter()
+            payload = graph.neighbors(conn, id, hops=min(hops, 3), limit=min(limit, 100))
+            if isinstance(payload, dict):
+                payload["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            return payload
+        finally:
+            conn.close()
+
+    # ── Artifacts: "what did my AI just make?" (provenance, not a file browser) ─
+
+    @app.get("/artifacts")
+    def artifacts_list(workspace: str = "blueleaf", limit: int = 50, include_os: bool = False):
+        """Heydey-produced artifacts with their provenance (run, approval,
+        risk tier, receipt). ``include_os=true`` additionally lists recent
+        files from configured folders — query-time only, no watcher — and
+        those carry provenance null because we did NOT make them."""
+        try:
+            conn = workspaces.connect(workspace)
+        except workspaces.WorkspaceError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=404)
+        try:
+            payload = {
+                "summary": artifacts.artifact_summary(conn, workspace),
+                "artifacts": artifacts.recent_artifacts(conn, workspace, limit=min(limit, 200)),
+            }
+            if include_os:
+                payload["os_files"] = artifacts.recent_os_files(limit=min(limit, 100))
+            return payload
         finally:
             conn.close()
 

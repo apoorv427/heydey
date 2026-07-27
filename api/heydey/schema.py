@@ -19,7 +19,7 @@ Migration is versioned via schema_meta and idempotent (IF NOT EXISTS throughout)
 import sqlite3
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 5  # v5 (W2): + risk_tier on approvals/receipts — 4-tier action taxonomy in the audit trail
+SCHEMA_VERSION = 6  # v6 (G1): graph rebuild — canonical entities + aliases + typed edges w/ provenance
 
 VECTOR_SIZE = 384  # BAAI/bge-small-en-v1.5 — same embedder as the migrating KB
 
@@ -38,7 +38,13 @@ REQUIRED_TABLES = frozenset(
         "receipts",
         "costs",
         "approvals",
-        # graph (Executor Contract B)
+        # graph v2 (G1 rebuild): canonical identity + typed edges + provenance
+        "graph_entities",
+        "graph_aliases",
+        "graph_edges",
+        "graph_mentions",
+        "graph_backfill",
+        # graph v1 (legacy, Executor Contract B)
         "entities",
         "relationships",
         "activity_edges",
@@ -149,7 +155,81 @@ CREATE TABLE IF NOT EXISTS approvals (
     resolved_at  TEXT
 );
 
--- ---- graph: Executor Contract B, verbatim ----
+-- ---- graph v2 (G1 rebuild): canonical identity + typed edges + provenance ----
+-- The v1 tables below are LEGACY (kept so old rows/readers don't break); the
+-- rebuild writes here. Three measured v1 failures this schema fixes:
+--   1. identity keyed on (label,type,source_doc_id) -> 26 nodes for a single product.
+--      Fixed by UNIQUE(canonical_key, type) — one node per real-world thing.
+--   2. `relationships` never written (0 rows) -> everything orphaned.
+--      Fixed by graph_edges carrying a TYPED predicate as a first-class row.
+--   3. no provenance on relations -> nothing could be cited.
+--      Fixed by doc_id + chunk_id + extractor on EVERY edge (cite-or-silent
+--      applies to the graph too: an edge no one can source is not shippable).
+CREATE TABLE IF NOT EXISTS graph_entities (
+    id            INTEGER PRIMARY KEY,
+    canonical_key TEXT NOT NULL,          -- casefolded, punctuation-stripped identity key
+    label         TEXT NOT NULL,          -- canonical display form
+    type          TEXT NOT NULL,          -- person|org|product|technology|decision|
+                                          -- commitment|money|date|place|marker|lock|slice
+    workspace_id  TEXT,
+    confidence    REAL,
+    mention_count INTEGER NOT NULL DEFAULT 0,
+    first_seen    TEXT,
+    last_seen     TEXT,
+    UNIQUE(canonical_key, type)
+);
+CREATE INDEX IF NOT EXISTS idx_gent_type ON graph_entities(type);
+CREATE INDEX IF NOT EXISTS idx_gent_label ON graph_entities(label);
+
+CREATE TABLE IF NOT EXISTS graph_aliases (
+    entity_id   INTEGER NOT NULL,
+    alias       TEXT NOT NULL,
+    alias_key   TEXT NOT NULL,
+    source_doc_id TEXT,
+    created_at  TEXT,
+    UNIQUE(alias_key, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_galias_key ON graph_aliases(alias_key);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id          INTEGER PRIMARY KEY,
+    src_id      INTEGER NOT NULL,
+    dst_id      INTEGER NOT NULL,
+    predicate   TEXT NOT NULL,            -- see graph.PREDICATES (typed, directional)
+    confidence  REAL,
+    weight      REAL,
+    doc_id      TEXT,                     -- provenance: which document asserted it
+    chunk_id    TEXT,                     -- provenance: which chunk
+    extractor   TEXT,                     -- gazetteer|regex|llm|pmi|co_activity
+    asserted_at TEXT,
+    UNIQUE(src_id, dst_id, predicate, doc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gedge_src ON graph_edges(src_id, predicate);
+CREATE INDEX IF NOT EXISTS idx_gedge_dst ON graph_edges(dst_id, predicate);
+
+CREATE TABLE IF NOT EXISTS graph_mentions (
+    entity_id  INTEGER NOT NULL,
+    doc_id     TEXT NOT NULL,
+    chunk_id   TEXT,
+    confidence REAL,
+    created_at TEXT,
+    UNIQUE(entity_id, doc_id, chunk_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gment_doc ON graph_mentions(doc_id);
+CREATE INDEX IF NOT EXISTS idx_gment_entity ON graph_mentions(entity_id);
+
+-- Backfill bookkeeping so a multi-hour re-graph is resumable and per-doc isolated.
+CREATE TABLE IF NOT EXISTS graph_backfill (
+    doc_id      TEXT PRIMARY KEY,
+    pass        TEXT,                     -- deterministic|llm
+    status      TEXT,                     -- done|failed|skipped
+    entities    INTEGER,
+    edges       INTEGER,
+    error       TEXT,
+    updated_at  TEXT
+);
+
+-- ---- graph v1 (LEGACY — Executor Contract B, verbatim; superseded by graph_* above) ----
 CREATE TABLE IF NOT EXISTS entities (
     id            INTEGER PRIMARY KEY,
     label         TEXT NOT NULL,
