@@ -67,20 +67,23 @@ Every path below is code in this repo, not a diagram of intent — the fail-clos
 branch on the right is why the refusal above happens.
 
 ```mermaid
+---
+config:
+  flowchart:
+    rankSpacing: 34
+    nodeSpacing: 36
+---
 flowchart TD
-    A["Your files<br/>PRDs · interviews · notes · decisions"] --> B["Ingest<br/>PII scrub + injection guard"]
-    B --> C[("One SQLite file<br/>per workspace")]
-    Q(["Your question"]) --> R["Hybrid retrieval<br/>sqlite-vec + FTS5 · RRF fusion"]
+    A["Your files · PRDs · interviews · notes<br/>ingested with a PII scrub + injection guard"] --> C[("One SQLite file per workspace")]
+    Q(["Your question"]) --> R["Hybrid retrieval · sqlite-vec + FTS5 · RRF"]
     C --> R
-    R --> X["Executor model<br/>writes the answer"]
-    X --> V{"Validator model — different family,<br/>enforced at config-write<br/>every claim vs. the retrieved chunks"}
-    V -->|all claims grounded| P["Cited answer<br/>receipt per sentence"]
-    V -->|any claim unproven| F["Retry once, then extractive, then<br/>'The records don't cover this yet.'"]
-    P --> L[("Receipt ledger<br/>source · chunk · score · PASS/FAIL · model · cost")]
+    R --> X["Executor model writes the answer"]
+    X --> V["⚖️ Validator — a different model family · fails closed"]
+    V -->|every claim grounded| P["Cited answer + a receipt per sentence"]
+    V -->|any claim unproven| F["Retry → extractive → honest refusal"]
+    P --> AP["Non-read action? → approval tray, nothing fires silently"]
+    P --> L[("Receipt ledger · source · chunk · score · PASS · cost")]
     F --> L
-    P --> T{"Taking an action?<br/>risk tier decides"}
-    T -->|read| L
-    T -->|write_local · exec · external| AP["Approval tray<br/>prepared action — nothing fires silently"]
     AP --> L
 
     classDef store fill:#111a2e,stroke:#4FD8C4,color:#E6EAF2
@@ -88,9 +91,9 @@ flowchart TD
     classDef gate fill:#12233a,stroke:#4FD8C4,color:#E6EAF2
     classDef pass fill:#0D1426,stroke:#4FD8C4,color:#4FD8C4
     classDef refuse fill:#0D1426,stroke:#E8A13C,color:#E8A13C
-    class A,B,Q,R,X,AP node
+    class A,Q,R,X,AP node
     class C,L store
-    class V,T gate
+    class V gate
     class P pass
     class F refuse
 ```
