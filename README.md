@@ -116,7 +116,9 @@ printed** (measured on a fresh environment: **2.9 minutes** to a cited, gate-che
 the eval judge now defaults to a **third model family** (deepseek), with a loud warning on any
 same-family fallback · the **4-tier action-risk taxonomy** and **OAuth + PKCE plumbing** for the
 first real connector (Google Workspace, read-only — goes live when the OAuth client credentials
-do) · **per-workspace corpus blocks** for multi-client installs.
+do) · **per-workspace corpus blocks** for multi-client installs · the **AI-PM playbook** behind
+the hero flow above — doc-driven Morning-Brief section, the three-agent fleet, and the
+PRD-section prepared action (verbatim quotes only, `write_local`, receipt attached).
 
 **Next:** real OAuth connectors (the three shipped connectors are synthetic **demo** MCP
 servers that exercise the security pipeline) · the validator-independence experiment

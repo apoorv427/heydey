@@ -112,6 +112,37 @@ def _execute_sku_suppression(workspace_id: str, payload: dict) -> dict:
             "note": "no write was fired — prepared action only"}
 
 
+def _execute_prd_section(workspace_id: str, payload: dict) -> dict:
+    """The PM prepared action (playbook_pm): a local markdown PRD-section draft
+    — VERBATIM retrieved quotes with per-quote source lines, never synthesis.
+    Local filesystem only, same L34 posture as the SKU executor."""
+    artifacts_dir = config.workspaces_root() / workspace_id / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    artifact_path = artifacts_dir / f"prd-section-{stamp}.md"
+
+    topic = payload.get("topic", "")
+    quotes = payload.get("quotes", [])
+    sources = payload.get("sources", [])
+    lines = [
+        f"# PRD section draft — {topic}",
+        "",
+        f"_Prepared {stamp}Z · {len(quotes)} verbatim evidence quotes · extraction only, no synthesis_",
+        "",
+        "## Evidence",
+    ]
+    for q in quotes:
+        score = f" · score {q['score']}" if q.get("score") is not None else ""
+        lines += ["", f"> {q.get('text', '')}",
+                  f"— {q.get('source', 'unknown')} · chunk {q.get('chunk', 0)}{score}"]
+    lines += ["", "## Sources", *[f"- {s}" for s in sources], ""]
+    artifact_path.write_text("\n".join(lines))
+
+    return {"artifact": str(artifact_path),
+            "sources": sources,
+            "note": "no write was fired — prepared action only"}
+
+
 def _execute_connector_call(workspace_id: str, payload: dict) -> dict:
     """Approving a connector action records the consent — the MCP host performs
     the actual call, re-checking this approval id (Contract C Layer 2). Nothing
@@ -121,6 +152,7 @@ def _execute_connector_call(workspace_id: str, payload: dict) -> dict:
 
 
 _EXECUTORS = {"sku_suppression": _execute_sku_suppression,
+              "prd_section": _execute_prd_section,
               "connector_call": _execute_connector_call}
 
 

@@ -42,17 +42,21 @@ from . import connector_sync, models_config, models_state, pipeline
 
 INTERVIEW: list[dict] = [
     {"key": "business_type", "label": "What kind of business is this?",
-     "type": "choice", "options": ["d2c", "agency"]},
+     "type": "choice", "options": ["d2c", "agency", "product"]},
     {"key": "company_name", "label": "What is the business called?",
      "type": "text", "pattern": r"^[A-Za-z0-9][A-Za-z0-9 .&'-]{1,39}$"},
     {"key": "primary_goal", "label": "What should the fleet do first?",
      "type": "choice", "options_by_playbook": {
         "d2c-ops":      ["daily_brief", "cited_answers", "cost_watch"],
-        "agency-brief": ["client_briefs", "cited_answers"]}},
+        "agency-brief": ["client_briefs", "cited_answers"],
+        "pm-product":   ["daily_brief", "cited_answers"]}},
     {"key": "sources", "label": "Which connected sources should it watch?",
      "type": "multi", "options_by_playbook": {
         "d2c-ops":      ["demo-shopify", "demo-sheets"],
-        "agency-brief": ["demo-agency"]}},
+        "agency-brief": ["demo-agency"],
+        # pm sources are CORPUS THEMES (doc folders), not connectors — recorded
+        # in foundry_events; the fixed trio watches all three themes in v1.
+        "pm-product":   ["prds", "interviews", "competitor-notes"]}},
     {"key": "answer_style", "label": "How should answers read?",
      "type": "choice", "options": ["verbatim", "synthesized"]},
 ]
@@ -63,7 +67,8 @@ INTERVIEW: list[dict] = [
 #   - k_cited: bumped k when primary_goal == "cited_answers" (analysts only; else None)
 #   - synthesize_by_style: True -> respect ⑤ answer_style; False -> always extractive
 
-_PLAYBOOK_BY_BUSINESS_TYPE = {"d2c": "d2c-ops", "agency": "agency-brief"}
+_PLAYBOOK_BY_BUSINESS_TYPE = {"d2c": "d2c-ops", "agency": "agency-brief",
+                              "product": "pm-product"}
 
 _SHELF: dict[str, dict] = {
     "d2c-ops": {
@@ -96,6 +101,25 @@ _SHELF: dict[str, dict] = {
                 "{company}: watches spend and CAC against budget from synced sheets — extractive, cited.",
                 4, None, False, "spend cac budget cost"),
         },
+    },
+    "pm-product": {
+        # Doc-driven playbook (playbook_pm): the corpus IS the source — no
+        # connectors, so no watch/goal minting; the spec'd trio ships as core
+        # (fleet = exactly 3 by construction, the USE-CASES W1 shape).
+        "connectors": [],
+        "core": [
+            ("pm-competitor-watch", "{company} — Competitor Watch",
+             "{company}: flags competitor moves from ingested notes — extractive, cited.",
+             6, None, False, "competitor pricing positioning launch"),
+            ("pm-user-voice", "{company} — User Voice",
+             "{company}: answers user-feedback questions from ingested interviews — every sentence cited.",
+             6, 8, True, "interview user feedback friction onboarding"),
+            ("pm-roadmap-risk", "{company} — Roadmap Risk",
+             "{company}: flags roadmap risks and slips from ingested PRDs — extractive, cited.",
+             6, None, False, "roadmap risk dependency deadline scope"),
+        ],
+        "watch": {},
+        "goal": {},
     },
     "agency-brief": {
         "connectors": ["demo-agency"],
@@ -257,12 +281,20 @@ def corpus_scan(conn: sqlite3.Connection, workspace_id: str) -> dict:
     connector_rows = connector_sync.live_map(conn, workspace_id)
     clean_sources = [c["connector_id"] for c in connector_rows
                      if (c.get("chunks") or 0) > 0]
+    # Doc-driven playbooks (pm-product) pick CORPUS THEMES, not connectors —
+    # same rule, same phrase: a theme is clean only when its docs actually
+    # landed in this workspace. "other" never qualifies as a pickable theme.
+    from . import playbook_pm  # local import, mirrors morning_brief's pattern
+    theme_rows = conn.execute(
+        "SELECT DISTINCT COALESCE(source_file, doc_id) FROM points").fetchall()
+    doc_themes = sorted({playbook_pm._theme_of(r[0]) for r in theme_rows if r[0]}
+                        - {"other"})
     return {
         "chunks": chunks,
         "docs": docs,
         "entities": entities,
         "connectors": connector_rows,
-        "clean_sources": clean_sources,
+        "clean_sources": clean_sources + doc_themes,
     }
 
 
@@ -352,7 +384,7 @@ def _mint(playbook: str, template: tuple, company: str, cited_bump: bool,
 
 
 def _build_fleet(playbook: str, answers: dict) -> list[dict]:
-    """CORE (2) + one WATCH per chosen source (1-2) + GOAL specialist (0-1)
+    """CORE (2-3) + one WATCH per chosen source (0-2) + GOAL specialist (0-1)
     -> N in [3, 6] by construction. Ids are fixed per playbook (idempotent
     re-onboard). ``{company}`` fills display strings only — never prompts."""
     shelf = _SHELF[playbook]
@@ -464,7 +496,8 @@ def instantiate(conn: sqlite3.Connection, workspace_id: str,
             if src not in scan["clean_sources"]:
                 # UI's error-with-next-step: the caller must sync a source first.
                 raise FoundryError(
-                    f"sync a source first — connect step (no chunks from: {src})"
+                    f"sync a source first — connect step (no chunks from: {src};"
+                    f" sync the connector or ingest that folder)"
                 )
 
         specs = _build_fleet(playbook, answers)

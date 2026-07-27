@@ -207,6 +207,12 @@ try:
 except Exception as exc:  # optional section — log and ship the brief without it
     log.warning("d2c-ops section not registered: %s", exc)
 
+try:
+    from . import playbook_pm
+    EXTRA_SECTIONS.append(("pm", playbook_pm.brief_section))
+except Exception as exc:  # optional section — log and ship the brief without it
+    log.warning("pm section not registered: %s", exc)
+
 
 def build_brief(conn: sqlite3.Connection, *, window_hours: int = 48,
                 workspace_id: str = "blueleaf") -> list[dict]:
