@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from heydey import graph, graph_resolve, workspaces
-from tests.conftest import auth_headers
+from conftest import auth_headers
 
 WEBAPP = Path(__file__).resolve().parents[2] / "webapp" / "app"
 CANVAS = WEBAPP / "components" / "graph" / "GraphCanvas.tsx"
