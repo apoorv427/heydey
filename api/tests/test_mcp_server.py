@@ -47,6 +47,15 @@ def ask_ws(heydey_home, monkeypatch):
                           "created_at": "2026-06-24T10:00:00"}),
     ])
     monkeypatch.setattr(ask_mod, "embed_texts", lambda t: [_axis(0) for _ in t])
+    # No live model lane in tests. Without this the "no executor_fn injected"
+    # case takes whatever path the HOST happens to offer: extractive on a dev
+    # Mac with Ollama running, a hard error on CI where nothing answers — which
+    # is exactly how this file passed locally and failed on GitHub. Pinning
+    # reachability to False makes the offline/extractive degrade deterministic
+    # everywhere. Tests that inject executor_fn/validator_fn are unaffected:
+    # an injected completion is treated as reachable by design.
+    from heydey import llm_client
+    monkeypatch.setattr(llm_client, "is_reachable", lambda *a, **k: False)
     yield "mcpask"
     conn.close()
 
