@@ -11,7 +11,11 @@ Fail policy (Executor Contract A #3), enforced here, not in a prompt:
   **degrade to extractive**, labeled ``validator-degraded``. The unvalidated synthesized
   text never ships.
 Offline (Contract A #4): no validator reachable → degrade to extractive + the
-  ``UNVALIDATED — offline`` badge (the only permitted bypass).
+  ``UNVALIDATED — offline`` badge (the only permitted bypass). The EXECUTOR lane
+  has the same posture (``executor-offline``): if no writer model can be reached
+  at all, the run still ships the verbatim cited slice rather than raising — a
+  dead Ollama must never turn into a 500 for the UI or a JSON-RPC error for an
+  MCP client.
 
 Groundedness of the shipped answer:
   - synthesized-and-passed → the cross-model validator confirmed every sentence.
@@ -61,7 +65,8 @@ class RunResult:
     run_id: str
     question: str
     answer: str
-    answer_kind: str  # synthesized | validator-degraded | unvalidated-offline | extractive | egress-blocked | empty
+    answer_kind: str  # synthesized | validator-degraded | unvalidated-offline
+                      # | executor-offline | extractive | egress-blocked | empty
     validator_status: str
     validator_pass: Optional[bool]
     executor_model: str
@@ -210,33 +215,50 @@ def run_pipeline(conn: sqlite3.Connection, spec: AgentSpec, question: str, *,
         ok, failed = deterministic_grounding(answer, hits)
         final_val = _grounding_result(answer, hits, executor_model, validator_model, ok, failed)
     else:
-        answer, c1, ti1, to1 = _synthesize(executor_model, question, hits, executor_fn=executor_fn)
-        cost += c1
-        tokens_in += ti1
-        tokens_out += to1
-        val = _validate(answer)
-        if val.status == "unvalidated_offline":
-            answer, answer_kind = extractive, "unvalidated-offline"
+        try:
+            answer, c1, ti1, to1 = _synthesize(executor_model, question, hits,
+                                               executor_fn=executor_fn)
+        except llm_client.LLMError:
+            # EXECUTOR lane unreachable (Ollama down, missing key, provider 5xx).
+            # The validator already had this posture; the executor did not, so a
+            # dead model turned a cited answer into a hard error — an MCP client
+            # got a JSON-RPC -32603 and the UI a 500, instead of the honest
+            # degrade this system promises. Same rule as everywhere else: never a
+            # silent failure, never a fabricated one — fall back to the verbatim
+            # extractive answer (grounded by construction, receipts intact) and
+            # label it so nobody mistakes it for a validated synthesis.
+            answer, answer_kind = extractive, "executor-offline"
             ok, failed = deterministic_grounding(answer, hits)
-            final_val = _grounding_result(answer, hits, executor_model, validator_model, ok, failed,
-                                          status="unvalidated_offline", passed=None)
-        elif val.passed:
-            answer_kind, final_val = "synthesized", val
+            final_val = _grounding_result(answer, hits, executor_model, validator_model,
+                                          ok, failed, status="unvalidated_offline", passed=None)
+            c1 = ti1 = to1 = 0  # nothing was spent; fall through to the common tail
         else:
-            # one retry with the failed claims fed back
-            retry_used = True
-            answer2, c2, ti2, to2 = _synthesize(executor_model, question, hits, val.failed_claims, executor_fn)
-            cost += c2
-            tokens_in += ti2
-            tokens_out += to2
-            val2 = _validate(answer2)
-            if val2.status == "validated" and val2.passed:
-                answer, answer_kind, final_val = answer2, "synthesized", val2
-            else:
-                # degrade to extractive (grounded by construction, checked deterministically)
-                answer, answer_kind = extractive, "validator-degraded"
+            cost += c1
+            tokens_in += ti1
+            tokens_out += to1
+            val = _validate(answer)
+            if val.status == "unvalidated_offline":
+                answer, answer_kind = extractive, "unvalidated-offline"
                 ok, failed = deterministic_grounding(answer, hits)
-                final_val = _grounding_result(answer, hits, executor_model, validator_model, ok, failed)
+                final_val = _grounding_result(answer, hits, executor_model, validator_model, ok, failed,
+                                              status="unvalidated_offline", passed=None)
+            elif val.passed:
+                answer_kind, final_val = "synthesized", val
+            else:
+                # one retry with the failed claims fed back
+                retry_used = True
+                answer2, c2, ti2, to2 = _synthesize(executor_model, question, hits, val.failed_claims, executor_fn)
+                cost += c2
+                tokens_in += ti2
+                tokens_out += to2
+                val2 = _validate(answer2)
+                if val2.status == "validated" and val2.passed:
+                    answer, answer_kind, final_val = answer2, "synthesized", val2
+                else:
+                    # degrade to extractive (grounded by construction, checked deterministically)
+                    answer, answer_kind = extractive, "validator-degraded"
+                    ok, failed = deterministic_grounding(answer, hits)
+                    final_val = _grounding_result(answer, hits, executor_model, validator_model, ok, failed)
 
     receipts = _write_receipts(conn, run_id, final_val, hits, executor_model, cost)
 

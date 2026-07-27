@@ -212,3 +212,28 @@ def test_s7_egress_ok_when_no_connector_content(heydey_home, monkeypatch):
         assert called == ["deepseek/deepseek-chat"]
     finally:
         conn.close()
+
+
+def test_executor_offline_degrades_instead_of_raising(conn, monkeypatch):
+    """A dead model lane must not become a 500 (UI) or a JSON-RPC error (MCP).
+
+    Found by CI, not locally: the suite passed on a dev Mac with Ollama running
+    and failed on a runner with no model at all, because only the VALIDATOR had
+    an offline posture — the executor raised straight out. The run now ships the
+    verbatim cited slice, labeled honestly."""
+    from heydey import llm_client
+
+    def unreachable(*a, **k):
+        raise llm_client.LLMError("no model lane (simulated outage)")
+
+    monkeypatch.setattr(llm_client, "complete", unreachable)
+    monkeypatch.setattr(llm_client, "is_reachable", lambda *a, **k: False)
+
+    r = run_pipeline(conn, AgentSpec("a", "Analyst"), "what is the pricing floor?")
+
+    assert r.answer_kind == "executor-offline"
+    assert r.answer, "an outage must still ship the grounded slice, not an empty string"
+    assert r.citations, "citations survive an outage — they come from retrieval, not the model"
+    assert r.badge == "UNVALIDATED — offline"   # labeled, never passed off as validated
+    assert r.validator_pass is None
+    assert r.cost_usd == 0.0                     # nothing was spent
